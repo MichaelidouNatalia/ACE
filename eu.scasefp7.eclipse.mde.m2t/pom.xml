@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+
+	<parent>
+		<groupId>eu.scasefp7.eclipse</groupId>
+		<artifactId>mde</artifactId>
+		<version>1.0.0-SNAPSHOT</version>
+	</parent>
+
+	<artifactId>eu.scasefp7.eclipse.mde.m2t</artifactId>
+	<packaging>eclipse-plugin</packaging>
+
+	<build>
+	   <plugins>
+	     <plugin>
+	       <groupId>org.eclipse.acceleo</groupId>
+	       <artifactId>org.eclipse.acceleo.maven</artifactId>
+	       <version>3.5.2</version>
+	       <executions>
+	         <execution>
+	           <id>acceleo-compile</id>
+	           <phase>compile</phase>
+	           <goals>
+	              <goal>acceleo-compile</goal>
+	            </goals>
+	         </execution>
+	       </executions>
+	       <configuration>
+	         <useBinaryResources>false</useBinaryResources>
+	         <usePlatformResourcePath>true</usePlatformResourcePath>
+	         <acceleoProject>
+	           <root>${project.basedir}</root>
+	           <entries>
+	             <entry>
+	               <input>src</input>
+	               <output>target/classes</output>
+	             </entry>
+	           </entries>
+	         </acceleoProject>
+	         <packagesToRegister>
+	           <!-- Add ecore models to register for compilation here -->
+<!-- 	           <packageToRegister>org.eclipse.emf.ecore.EcorePackage</packageToRegister> -->
+	           <packageToRegister>AnnotationLayerStack.AnnotationLayerStackPackage</packageToRegister>
+	           <packageToRegister>AuthenticationLayerPSM.AuthenticationLayerPSMPackage</packageToRegister>
+               <packageToRegister>AuthorizationLayerPSM.AuthorizationLayerPSMPackage</packageToRegister>
+	           <packageToRegister>SearchLayerPSM.SearchLayerPSMPackage</packageToRegister>
+	           <packageToRegister>ExternalServiceLayerPSM.ExternalServiceLayerPSMPackage</packageToRegister>
+	           <packageToRegister>RESTfulServicePSM.RESTfulServicePSMPackage</packageToRegister>
+	           <packageToRegister>MDEMigratorPSMMetamodel.MDEMigratorPSMMetamodelPackage</packageToRegister>
+	         </packagesToRegister>
+	       </configuration>
+	     </plugin>
+	   </plugins>
+	 </build>
+
+	<dependencies>
+		<dependency>
+			<groupId>eu.scasefp7.eclipse</groupId>
+			<artifactId>eu.scasefp7.eclipse.mde.wrapper</artifactId>
+			<version>1.0.0-SNAPSHOT</version>
+			<type>eclipse-plugin</type>
+		</dependency>
+	</dependencies>
+</project>

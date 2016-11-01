@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?eclipse version="3.4"?>
+<plugin>
+
+   <extension
+         point="org.eclipse.ui.commands">
+      <category
+            name="Sample Category"
+            id="eu.scasefp7.eclipse.mde.m2t.commands.category">
+      </category>
+      <command
+            name="Sample Command"
+            categoryId="eu.scasefp7.eclipse.mde.m2t.commands.category"
+            id="eu.scasefp7.eclipse.mde.m2t.commands.executeModelToTextTransformation">
+         <commandParameter id="YamlFilePath" name="YAML file path"/>
+         <commandParameter id="WebServiceName" name="Web service name"/>
+         <commandParameter id="MDEOutputFolder" name="Output folder"/>
+         <commandParameter id="DatabaseIP" name="Database IP"/>
+         <commandParameter id="DatabasePort" name="Database port"/>
+         <commandParameter id="DatabaseUsername" name="Database username"/>
+         <commandParameter id="DatabasePassword" name="Database password"/>
+         <commandParameter id="DatabaseType" name="Database type"/>
+         <commandParameter id="DBMigration" name="Migrate database" optional="true"/>
+         <commandParameter id="Authentication" name="Generate authentication"/>
+         <commandParameter id="Authorization" name="Generate authorization"/>
+         <commandParameter id="DatabaseSearching" name="Generate searching"/>
+         <commandParameter id="ExternalComposition" name="Include external composition"/>
+         <commandParameter id="ReloadExistingModels" name="Reload previously configured models" optional="true"/>  
+      </command>
+   </extension>
+   <extension
+         point="org.eclipse.ui.handlers">
+      <handler
+            commandId="eu.scasefp7.eclipse.mde.m2t.commands.executeModelToTextTransformation"
+            class="eu.scasefp7.eclipse.mde.m2t.handlers.MDEModelToTextTransformation">
+      </handler>
+   </extension>
+
+</plugin>
