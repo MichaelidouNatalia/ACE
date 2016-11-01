@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?eclipse version="3.4"?>
+<plugin>
+
+   <extension
+         point="org.eclipse.ui.views">
+      <category
+            name="MDE Category"
+            id="eu.scasefp7.eclipse.mde.ui.category">
+      </category>
+      <view
+            name="MDE GUI"
+            icon="icons/sample.gif"
+            category="eu.scasefp7.eclipse.mde.ui.category"
+            class="eu.scasefp7.eclipse.mde.ui.views.MDETopLevelUIInvoker"
+            id="eu.scasefp7.eclipse.mde.ui.views.MDETopLevelUIInvoker">
+      </view>
+   </extension>
+   <extension
+         point="org.eclipse.ui.perspectiveExtensions">
+      <perspectiveExtension
+            targetID="org.eclipse.jdt.ui.JavaPerspective">
+         <view
+               ratio="0.5"
+               relative="org.eclipse.ui.views.ProblemView"
+               relationship="right"
+               id="eu.scasefp7.eclipse.mde.ui.views.MDETopLevelUIInvoker">
+         </view>
+      </perspectiveExtension>
+   </extension>
+   <extension
+         point="org.eclipse.help.contexts">
+      <contexts
+            file="contexts.xml">
+      </contexts>
+   </extension>
+   
+   <extension
+         point="org.eclipse.ui.propertyPages">
+     <page
+           category="eu.scasefp7.eclipse.core.ui.preferences.global"
+           class="eu.scasefp7.eclipse.mde.ui.preferences.CodeGenerationPreferencePage"
+           id="eu.scasefp7.eclipse.mde.ui.propertyPages.CodeGenerationPreferencePage"
+           name="Code generation">
+		 <enabledWhen>
+		     <adapt type="org.eclipse.core.resources.IProject">
+		          <test property="org.eclipse.core.resources.projectNature" value="eu.scasefp7.eclipse.core.scaseNature"/>
+		     </adapt>         
+         </enabledWhen>           
+     </page>
+  </extension>
+  <extension
+        point="org.eclipse.ui.preferencePages">
+     <page
+           category="eu.scasefp7.eclipse.core.ui.preferences.global"
+           class="eu.scasefp7.eclipse.mde.ui.preferences.CodeGenerationPreferencePage"
+           id="eu.scasefp7.eclipse.mde.ui.preferencePages.CodeGenerationPreferencePage"
+           name="Code generation" />
+  </extension>
+  <extension
+        point="org.eclipse.core.runtime.preferences">
+     <initializer
+           class="eu.scasefp7.eclipse.mde.ui.preferences.PreferenceInitializer">
+     </initializer>
+  </extension>
+
+   <extension
+         point="org.eclipse.ui.commands">
+      <command
+            id="eu.scasefp7.eclipse.mde.ui.generateCode"
+            name="Generate code">
+         <commandParameter
+               id="eu.scasefp7.eclipse.mde.ui.generateCode.reload"
+               name="Reload existing models"
+               optional="true">
+         </commandParameter>
+      </command>
+      <command
+           	id="eu.scasefp7.eclipse.mde.ui.importMavenProject"
+            name="Import generated Maven project">
+			<commandParameter id="WebServiceName" name="Web service name" optional="false"/>
+     		<commandParameter id="MDEOutputFolder" name="Output folder" optional="false"/>
+      </command>
+   </extension>
+   <extension
+         point="org.eclipse.ui.handlers">
+      <handler
+            class="eu.scasefp7.eclipse.mde.ui.handlers.GenerateCodeHandler"
+            commandId="eu.scasefp7.eclipse.mde.ui.generateCode">
+      </handler>
+      <handler
+            class="eu.scasefp7.eclipse.mde.ui.handlers.ImportMavenProjectHandler"
+            commandId="eu.scasefp7.eclipse.mde.ui.importMavenProject">
+      </handler>
+   </extension>
+   <extension
+          point="org.eclipse.ui.views.properties.tabbed.propertyContributor">
+       <propertyContributor
+             contributorId="org.eclipse.ui.navigator.ProjectExplorer">
+          <propertyCategory category="eu.scasefp7.eclipse.category"/>
+       </propertyContributor>
+    </extension>
+    <extension
+          point="org.eclipse.ui.views.properties.tabbed.propertyTabs">
+       <propertyTabs contributorId="org.eclipse.ui.navigator.ProjectExplorer">
+          <propertyTab
+                category="eu.scasefp7.eclipse.category"
+                id="eu.scasefp7.eclipse.mde.ui.properties.codegentab"
+                image="icons/s-case_16.png"
+                label="Code generation">
+          </propertyTab>
+       </propertyTabs>
+    </extension>
+
+
+
+    <extension
+          point="org.eclipse.ui.views.properties.tabbed.propertySections">
+       <propertySections contributorId="org.eclipse.ui.navigator.ProjectExplorer">
+          <propertySection
+                class="eu.scasefp7.eclipse.mde.ui.preferences.CodeGenerationPropertySection"
+                id="eu.scasefp7.eclipse.mde.ui.properties.codegensection"
+                tab="eu.scasefp7.eclipse.mde.ui.properties.codegentab">
+             <input type="org.eclipse.core.resources.IResource"/>
+          </propertySection>
+       </propertySections>
+    </extension>
+    
+</plugin>

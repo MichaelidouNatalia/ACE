@@ -1,0 +1,200 @@
+-- @path COREPIMIN=/CIM_Ecore_metamodel/PIMMetamodel.ecore
+-- @path AUTHPIMIN=/AuthenticationLayer/AuthenticationPIMMetamodel.ecore
+-- @path AUTHPSMOUT=/AuthenticationLayer/AuthenticationPSMMetamodel.ecore
+-- @path COREPIMIN=/CIM_Ecore_metamodel/PSMMetamodel.ecore
+
+module AuthenticationPIMToPSMTransformation;
+create OUT : AUTHPSMOUT from IN : COREPIMIN, IN1 : AUTHPIMIN, IN2 : COREPSMIN;
+
+helper def: getRESTfulServicePSM : COREPSMIN!ServicePSM =
+	let RESTfulServicePSM : COREPSMIN!ServicePSM = COREPSMIN!ServicePSM.allInstances()->asSequence() in
+		RESTfulServicePSM->at(1);
+
+helper def: getJPAController : COREPSMIN!HibernateController =
+	let JPAController : COREPSMIN!HibernateController = COREPSMIN!HibernateController.allInstances()->asSequence() in
+		JPAController->at(1);
+
+helper def: getPIMAnnCRUDActivities : Sequence(AUTHPIMIN!AnnCRUDActivity) =
+	let AnnCRDUActivities : AUTHPIMIN!AnnCRUDActivity = AUTHPIMIN!AnnCRUDActivity.allInstances()->asSequence() in
+		AnnCRDUActivities;
+
+helper def: convertCRUDToHTTPVerb(CRUDVerbString : String) : String =
+	if
+		CRUDVerbString.substring(1,1) = 'c'  -- then it is create verb and has to be converted to post http verb
+	then
+		'post' + CRUDVerbString.substring(7, CRUDVerbString.size())
+	else
+		if
+			CRUDVerbString.substring(1,1) = 'r' -- then it is read verb and has to be converted to get http verb
+		then
+			'get' + CRUDVerbString.substring(5, CRUDVerbString.size())
+		else
+			if
+				CRUDVerbString.substring(1,1) = 'u' -- then it is update verb and has to be converted to put http verb
+			then
+				'put' + CRUDVerbString.substring(7, CRUDVerbString.size())
+			else
+				 CRUDVerbString -- delete remains the same
+			endif
+		endif
+	endif;
+
+helper def: getHTTPActivityByName(HTTPActivityName : String) : COREPSMIN!HTTPActivity =
+	let AllHTTPActivities : COREPSMIN!HTTPActivity = COREPSMIN!HTTPActivity.allInstances()->asSequence() in
+		AllHTTPActivities->select(HTTPActivity | HTTPActivity.name.toLower() = HTTPActivityName.toLower())->at(1);
+
+helper def: getPIMAnnCRUDActivityHandlers : Sequence(AUTHPIMIN!AnnCRUDActivityHandler) =
+	let AnnCRUDActivityHandlers : AUTHPIMIN!AnnCRUDActivityHandler = AUTHPIMIN!AnnCRUDActivityHandler.allInstances()->asSequence() in
+		AnnCRUDActivityHandlers;
+
+helper def: getHTTPActivityHandlerByName(HTTPActivityHandlerName : String) : COREPSMIN!HTTPActivityHandler =
+	let AllHTTPActivityHandlers : COREPSMIN!HTTPActivityHandler = COREPSMIN!HTTPActivityHandler.allInstances()->asSequence() in
+		AllHTTPActivityHandlers->select(HTTPActivityHandler | HTTPActivityHandler.name.toLower() = HTTPActivityHandlerName.toLower())->at(1);
+
+helper def: getAuthenticationPerformer : AUTHPIMIN!AuthenticationPerformer = 
+	let AuthenticationPerformers : AUTHPIMIN!AuthenticationPerformer = AUTHPIMIN!AuthenticationPerformer.allInstances()->asSequence() in
+		AuthenticationPerformers;
+
+helper def: getAuthenticationToken : AUTHPIMIN!AuthenticationToken =
+	let AuthenticationTokens : AUTHPIMIN!AuthenticationToken = AUTHPIMIN!AuthenticationToken.allInstances()->asSequence() in
+		AuthenticationTokens->select(authenticationToken | authenticationToken.oclIsTypeOf(AUTHPIMIN!Password) = false);
+
+helper def: getPasswordToken : AUTHPIMIN!AuthenticationToken =
+	let AuthenticationTokens : AUTHPIMIN!AuthenticationToken = AUTHPIMIN!AuthenticationToken.allInstances()->asSequence() in
+		AuthenticationTokens->select(authenticationToken | authenticationToken.oclIsTypeOf(AUTHPIMIN!Password) = true);
+
+helper def: getPIMGuestModeAnnotation : Sequence(AUTHPIMIN!GuestMode) =
+	let GuestModeAnnotations : AUTHPIMIN!GuestMode = AUTHPIMIN!GuestMode.allInstances()->asSequence() in
+		GuestModeAnnotations->select(guestModeAnnotation | guestModeAnnotation.oclIsTypeOf(AUTHPIMIN!GuestMode) = true);
+
+helper def: getPIMAuthOnlyModeAnnotation : Sequence(AUTHPIMIN!AuthenticationOnlyMode) =
+	let AuthenticationOnlyModeAnnotations : AUTHPIMIN!AuthenticationOnlyMode = AUTHPIMIN!AuthenticationOnlyMode.allInstances()->asSequence() in
+		AuthenticationOnlyModeAnnotations->select(authenticationOnlyMode | authenticationOnlyMode.oclIsTypeOf(AUTHPIMIN!AuthenticationOnlyMode) = true);
+
+helper def: getPIMBothModeAnnotation : Sequence(AUTHPIMIN!BothMode) =
+	let BothModeAnnotations : AUTHPIMIN!BothMode = AUTHPIMIN!BothMode.allInstances()->asSequence() in
+		BothModeAnnotations->select(bothModeAnnotations | bothModeAnnotations.oclIsTypeOf(AUTHPIMIN!BothMode) = true);
+
+rule PIMToPSMAuthentication{
+	from
+		PIMAnnotationModel : AUTHPIMIN!AnnotationModel
+	to
+		PSMAnnotationModel : AUTHPSMOUT!AnnotationModel(
+			name <- PIMAnnotationModel.name,
+			annotationType <- 'AuthenticationLayer',
+			annotatesRESTfulServicePSM <- thisModule.getRESTfulServicePSM,
+			hasAnnotatedElement <- Sequence{thisModule.createAnnJPAController(thisModule.getJPAController),
+											thisModule.getPIMAnnCRUDActivities->collect(PIMAnnCRUDActivity | PIMAnnCRUDActivity.annotatesResourceControllerCRUDActivity
+												->collect(PIMCRUDActivity | thisModule.createAnnHTTPActivity(PIMCRUDActivity))),
+											thisModule.getPIMAnnCRUDActivityHandlers->collect(PIMAnnCRUDActivityHandler | PIMAnnCRUDActivityHandler.annotatesCRUDActivityHandler
+												->collect(PIMCRUDActivityHandler | thisModule.createAnnHTTPActivityHandler(PIMCRUDActivityHandler)))},
+			hasAnnotation <- Sequence{thisModule.getAuthenticationPerformer->collect(AuthenticationPerformer | thisModule.createAuthenticationPerformer(AuthenticationPerformer)),
+									  thisModule.getPIMGuestModeAnnotation->collect(guestModeAnnotation | thisModule.createGuestMode(guestModeAnnotation)),
+									  thisModule.getPIMAuthOnlyModeAnnotation->collect(authOnlyModeAnnotation | thisModule.createAuthenticationOnlyMode(authOnlyModeAnnotation)),
+									  thisModule.getPIMBothModeAnnotation->collect(bothModeAnnotation | thisModule.createBothMode(bothModeAnnotation))}
+		)
+}
+
+unique lazy rule createAnnJPAController{
+	from
+		HibernateController : COREPIMIN!HibernateController
+	to
+		AnnJPAController : AUTHPSMOUT!AnnJPAController(
+			annotatesJPAController <- HibernateController
+		)
+}
+
+unique lazy rule createAnnHTTPActivity{
+	from
+		PIMCRUDActivity : COREPIMIN!CRUDActivity
+	to
+		AnnHTTPActivity : AUTHPSMOUT!AnnHTTPActivity(
+			annotatesHTTPActivity <- thisModule.getHTTPActivityByName(thisModule.convertCRUDToHTTPVerb(PIMCRUDActivity.name))	
+		)
+}
+
+unique lazy rule createAnnHTTPActivityHandler{
+	from
+		PIMCRUDActivityHandler : COREPIMIN!CRUDActivityHandler
+	to
+		AnnHTTPActivityHandler : AUTHPSMOUT!AnnHTTPActivityHandler(
+			annotatesHTTPActivityHandler <- thisModule.getHTTPActivityHandlerByName(thisModule.convertCRUDToHTTPVerb(PIMCRUDActivityHandler.name))	
+		)
+}
+
+unique lazy rule createAuthenticationPerformer{
+	from
+		PIMAuthenticationPerformer : AUTHPIMIN!AuthenticationPerformer
+	to
+		PSMAuthenticationPerformer : AUTHPSMOUT!AuthenticationPerformer(
+			authenticationModelName <- 'Java' + PIMAuthenticationPerformer.authenticationModelName,
+			authenticationModelParentName <- PIMAuthenticationPerformer.authenticationModelParentName,
+			isSystemAuthenticationPerformer <- thisModule.createAnnJPAController(thisModule.getJPAController),
+			hasAuthenticationToken <- Sequence{thisModule.getAuthenticationToken->collect(AuthenticationToken | thisModule.createPSMAuthenticationToken(AuthenticationToken)),
+											   thisModule.getPasswordToken->collect(passwordToken | thisModule.createPSMAuthenticationPasswordToken(passwordToken))}
+		)
+}
+		
+unique lazy rule createPSMAuthenticationToken{
+	from
+		PIMAuthenticationToken : AUTHPIMIN!AuthenticationToken
+	to
+		PSMAuthenticationToken : AUTHPSMOUT!AuthenticationToken(
+			name <- PIMAuthenticationToken.name,
+			type <- PIMAuthenticationToken.type,
+			bIsUnique <- PIMAuthenticationToken.bIsUnique
+		)
+}
+
+unique lazy rule createPSMAuthenticationPasswordToken{
+	from
+		PIMAuthenticationToken : AUTHPIMIN!AuthenticationToken
+	to
+		PSMAuthenticationToken : AUTHPSMOUT!Password(
+			name <- PIMAuthenticationToken.name,
+			type <- PIMAuthenticationToken.type,
+			bIsUnique <- PIMAuthenticationToken.bIsUnique
+		)
+}
+
+unique lazy rule createGuestMode{
+	from
+		PIMGuestModeAnnotation : AUTHPIMIN!GuestMode
+	to
+		PSMGuestModeAnnotation : AUTHPSMOUT!GuestMode(
+			HTTPActivityHandlerHasAuthenticationMode <- PIMGuestModeAnnotation.CRUDActivityHandlerAuthenticationMode->collect(AnnCRUDActivityHandler | 
+															AnnCRUDActivityHandler.annotatesCRUDActivityHandler->collect(CRUDActivityHandler |
+															thisModule.createAnnHTTPActivityHandler(CRUDActivityHandler))),
+			HTTPActivityHasAuthenticationMode <- PIMGuestModeAnnotation.CRUDActivityAuthenticationMode->collect(AnnCRUDActivity | 
+												 	AnnCRUDActivity.annotatesResourceControllerCRUDActivity->collect(CRUDActivity | 
+												 	thisModule.createAnnHTTPActivity(CRUDActivity)))
+		)
+}
+
+unique lazy rule createAuthenticationOnlyMode{
+	from
+		PIMAuthenticationOnlyMode : AUTHPIMIN!AuthenticationOnlyMode
+	to
+		PSMAuthenticationOnlyMode : AUTHPSMOUT!AuthenticationOnlyMode(
+			HTTPActivityHandlerHasAuthenticationMode <- PIMAuthenticationOnlyMode.CRUDActivityHandlerAuthenticationMode->collect(AnnCRUDActivityHandler | 
+															AnnCRUDActivityHandler.annotatesCRUDActivityHandler->collect(CRUDActivityHandler |
+																thisModule.createAnnHTTPActivityHandler(CRUDActivityHandler))),
+			HTTPActivityHasAuthenticationMode <- PIMAuthenticationOnlyMode.CRUDActivityAuthenticationMode->collect(AnnCRUDActivity | 
+													AnnCRUDActivity.annotatesResourceControllerCRUDActivity->collect(CRUDActivity | 
+													thisModule.createAnnHTTPActivity(CRUDActivity)))
+		)
+}
+
+unique lazy rule createBothMode{
+	from
+		PIMBothModeAnnotation : AUTHPIMIN!BothMode
+	to
+		PSMBothModeAnnotation : AUTHPSMOUT!BothMode(
+			HTTPActivityHandlerHasAuthenticationMode <- PIMBothModeAnnotation.CRUDActivityHandlerAuthenticationMode->collect(AnnCRUDActivityHandler | 
+															AnnCRUDActivityHandler.annotatesCRUDActivityHandler->collect(CRUDActivityHandler |
+															thisModule.createAnnHTTPActivityHandler(CRUDActivityHandler))),
+			HTTPActivityHasAuthenticationMode <- PIMBothModeAnnotation.CRUDActivityAuthenticationMode->collect(AnnCRUDActivity | 
+													AnnCRUDActivity.annotatesResourceControllerCRUDActivity->collect(CRUDActivity |
+													thisModule.createAnnHTTPActivity(CRUDActivity)))
+		)
+}

@@ -1,0 +1,8 @@
+
+Acceleo Templates folder contains all the acceleo templates that are used to perform any Model-to-Text transformations within S-CASE MDE engine.
+
+atl-transformations folder contains all the ATL transformations code that are used to perform any Model-to-Model transformations within S-CASE MDE engine.
+
+ecore-meta-models folder contains all the meta-models of the S-CASE MDE engine that are defined using the Ecore meta-meta-model
+
+java-code folder contains any accompanying java code.

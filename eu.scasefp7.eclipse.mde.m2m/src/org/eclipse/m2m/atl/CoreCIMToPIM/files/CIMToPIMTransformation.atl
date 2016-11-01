@@ -1,0 +1,749 @@
+-- @path CIM=/CIMToPIM/CIMMetamodel.ecore
+-- @path PIM=/CIMToPIM/PIMMetamodel.ecore
+
+module CIMToPIMTransformation;
+
+create OUT: PIM from IN: CIM;
+
+helper def: getCIMAlgoResources : Sequence(CIM!Resource) =
+	let AllCIMResources : CIM!Resource = CIM!Resource.allInstances()->asSequence() in AllCIMResources->select(CIMResource | CIMResource.isAlgorithmic = true);
+
+helper def: getCIMCRUDResources : Sequence(CIM!Resource) =
+	let AllCIMResources : CIM!Resource = CIM!Resource.allInstances()->asSequence() in AllCIMResources->select(CIMResource | CIMResource.isAlgorithmic = false);
+
+helper context CIM!Resource def: getNumberOfIncomingRelations : Integer =
+	let AllCIMResources : CIM!Resource = CIM!Resource.allInstances()->asSequence() in AllCIMResources->select(CIMResource | CIMResource.hasRelatedResource.includes(self))->size();
+
+helper context CIM!Resource def: createRCManagerURI : String = 
+	let AllCIMResources : CIM!Resoruce = CIM!Resource.allInstances()->asSequence() in 
+		if self.getNumberOfIncomingRelations = 0 --then this resource is not related of anyone
+		then
+			'/' + self.name
+		else
+			if self.getNumberOfIncomingRelations = 1  -- then this resource is related of exactly one other resource
+			then
+				'/' + AllCIMResources->select(CIMResource | CIMResource.hasRelatedResource.includes(self))->at(1).name + '/{' + AllCIMResources->select(CIMResource | CIMResource.hasRelatedResource.includes(self))->at(1).name + 'Id}/' + self.name
+			else -- then this resource is related of more than one other resources
+				'/multi' + self.name + 'Manager'
+			endif
+		endif;
+
+helper context CIM!Resource def: createRControllerURI : String = 
+	if self.getNumberOfIncomingRelations <= 1 --then this resource is related of at most one other resource
+	then
+		self.createRCManagerURI + '/{' + self.name + 'Id}'
+	else
+			'/multi' + self.name
+	endif;
+
+helper context CIM!Resource def: hasMultipleParents : Boolean =
+	if self.getNumberOfIncomingRelations <= 1
+	then
+		false
+	else
+		true
+	endif;
+
+helper context CIM!Resource def: hasParent: Boolean =
+	if self.getNumberOfIncomingRelations > 0
+	then
+		true
+	else
+		false
+	endif;
+
+helper context CIM!Resource def: getRelatedRMManagers : Sequence(CIM!Resource) =
+	let AllCIMResources : CIM!Resource = CIM!Resource.allInstances()->asSequence() in
+		AllCIMResources->select(CIMResource | self.hasRelatedResource.includes(CIMResource) and (CIMResource.isAlgorithmic = false));
+
+helper context CIM!Resource def: getRelatedAlgoModels : Sequence(CIM!Resource) = 
+		let AllCIMResources : CIM!Resource = CIM!Resource.allInstances()->asSequence() in
+		AllCIMResources->select(CIMResource | self.hasRelatedResource.includes(CIMResource) and (CIMResource.isAlgorithmic = true));
+
+helper context CIM!Resource def: getParentAlgoModels : Sequence(CIM!Resource) = 
+		let AllCIMResources : CIM!Resource = CIM!Resource.allInstances()->asSequence() in
+		AllCIMResources->select(CIMResource | CIMResource.hasRelatedResource.includes(self) and (CIMResource.isAlgorithmic = true));	
+
+helper def: getCIMService : Sequence(CIM!RESTfulServiceCIM) =
+	CIM!RESTfulServiceCIM.allInstances();
+
+helper def: getParentCRUDResources(CIMResource : CIM!Resource) : Sequence(CIM!Resource) =
+	let AllCIMResources : CIM!Resource = CIM!Resource.allInstances()->asSequence() in
+		AllCIMResources->select(Resource | Resource.hasRelatedResource.includes(CIMResource) and (Resource.isAlgorithmic = false));
+
+helper def: getParentAlgoResources(CIMResource : CIM!Resource) : Sequence(CIM!Resource) =
+	let AllCIMResources : CIM!Resource = CIM!Resource.allInstances()->asSequence() in
+		AllCIMResources->select(Resource | Resource.hasRelatedResource.includes(CIMResource) and (Resource.isAlgorithmic = true));
+
+helper context CIM!CRUDActivity def: toText : String =
+	if self.CRUDVerb = #CREATE
+	then
+		'create'
+	else
+		if self.CRUDVerb = #READ
+		then
+			'read'
+		else
+			if self.CRUDVerb = #UPDATE
+			then
+				'update'
+			else
+				'delete'
+			endif
+		endif
+	endif;
+
+helper context CIM!CRUDActivity def: toRDBMSVerb : PIM!RDBMSVerb =
+	if 
+		self.CRUDVerb = #CREATE
+	then
+		#INSERT
+	else
+		if
+			self.CRUDVerb = #READ
+		then
+			#SELECT
+		else
+			if
+				self.CRUDVerb = #UPDATE
+			then
+				#UPDATE
+			else
+				#DELETE
+			endif
+		endif
+	endif;
+
+
+rule CIMToPIMService {
+	from
+		CIMService: CIM!RESTfulServiceCIM
+	to
+		PIMService: PIM!RESTfulServicePIM (
+			name <- CIMService.name,
+			serviceOutputPath <- CIMService.serviceOutputPath,
+			serviceDatabaseIP <- CIMService.serviceDatabaseIP,
+			serviceDatabasePort <- CIMService.serviceDatabasePort,
+			serviceDatabaseUsername <- CIMService.serviceDatabaseUsername,
+			serviceDatabasePassword <- CIMService.serviceDatabasePassword,
+			serviceDatabaseType     <- CIMService.serviceDatabaseType,
+			hasDatabaseController <- thisModule.createDatabaseController(thisModule.getCIMService),
+			hasAlgoResourceModel <- thisModule.getCIMAlgoResources->collect(CIMAlgoResource | thisModule.createAlgoResourceModel(CIMAlgoResource)),
+			hasAlgoResourceController <- thisModule.getCIMAlgoResources->collect(CIMAlgoResource | thisModule.createAlgoResourceController(CIMAlgoResource)),
+			hasResourceModel <- thisModule.getCIMCRUDResources->collect(CIMCRUDResource | thisModule.createCRUDRModel(CIMCRUDResource)),
+			hasResourceModelManager <- thisModule.getCIMCRUDResources->collect(CIMCRUDResource | thisModule.createCRUDRMManager(CIMCRUDResource)),
+			hasResourceController <- thisModule.getCIMCRUDResources->collect(CIMCRUDResource | thisModule.createRController(CIMCRUDResource)),
+			hasResourceControllerManager <- thisModule.getCIMCRUDResources->collect(CIMCRUDResource | thisModule.createRCManager(CIMCRUDResource)),
+			hasRDBMSTable <- thisModule.getCIMCRUDResources->collect(CIMCRUDResource | thisModule.createRDBMSTable(CIMCRUDResource))
+		)
+}
+
+unique lazy rule createAlgoResourceModel{
+	from
+		CIMAlgoResource: CIM!Resource
+	to
+		PIMAlgoModel: PIM!AlgoResourceModel(
+			parentName <- CIMAlgoResource.name,
+			name <- 'Algo' + CIMAlgoResource.name + 'Model',
+			algoModelHasInputRepresentation <- CIMAlgoResource.hasInputRepresentation->collect(inputRepresentation | thisModule.addAlgoModelIRepresentation(inputRepresentation)),
+			algoModelHasOutputRepresentation <- CIMAlgoResource.hasOutputRepresentation->collect(outputRepresentation | thisModule.addAlgoModelORepresentation(outputRepresentation)),
+			algoModelHasProperty <- thisModule.createLinkListProperty(),
+			algoModelHasSetter <- thisModule.createLinkListPropertySetter(PIMAlgoModel.algoModelHasProperty),
+			algoModelHasGetter <- thisModule.createLinkListPropertyGetter(PIMAlgoModel.algoModelHasProperty),
+			hasRelatedAlgoModel <- CIMAlgoResource.getRelatedAlgoModels->collect(Resource | thisModule.createAlgoResourceModel(Resource)),
+			isRelatedAlgoModel <- CIMAlgoResource.getParentAlgoModels->collect(Resource | thisModule.createAlgoResourceModel(Resource)),
+			algoModelHasParseFunction <- PIMAlgoModel.algoModelHasInputRepresentation->collect(inputRepresentation | thisModule.createParseFunction(inputRepresentation)),
+			algoModelHasMarshallingFunction <- PIMAlgoModel.algoModelHasOutputRepresentation->collect(outputRepresentation | thisModule.createMarshalFunction(outputRepresentation)) 
+		)
+}
+
+unique lazy rule createAlgoResourceController{
+	from
+		CIMAlgoResource: CIM!Resource
+	to
+		PIMAlgoController: PIM!AlgoResourceController(
+			parentName <- CIMAlgoResource.name,
+			name <- 'Algo' + CIMAlgoResource.name + 'Controller',
+			controllerURI <- '/Algo' + CIMAlgoResource.name,
+			hasAssociatedAlgoModel <- thisModule.createAlgoResourceModel(CIMAlgoResource),
+			algoControllerHasCRUDActivity <- thisModule.createAlgoControllerCRUDActivity(CIMAlgoResource)
+		)
+}
+
+unique lazy rule createCRUDRModel{
+	from
+		CIMCRUDResource: CIM!Resource
+	to
+		PIMRModel: PIM!ResourceModel(
+			parentName <- CIMCRUDResource.name,
+			name <- CIMCRUDResource.name + 'Model',
+			hasRelatedModelManager <- CIMCRUDResource.getRelatedRMManagers->collect(Resource | thisModule.createCRUDRMManager(Resource)),
+			hasRelatedAlgoModel <- CIMCRUDResource.getRelatedAlgoModels->collect(Resource | thisModule.createAlgoResourceModel(Resource)),
+			rModelHasIRepresentation <- CIMCRUDResource.hasInputRepresentation->collect(inputRepresentation | thisModule.addRModelIRepresentation(inputRepresentation)),
+			rModelHasOutputRepresentation <- CIMCRUDResource.hasOutputRepresentation->collect(outputRepresentation | thisModule.addRModelORepresentation(outputRepresentation)),
+			rModelHasProperty <- CIMCRUDResource.hasProperty->collect(CIMProperty | thisModule.addRModelProperties(CIMProperty))->union(Sequence{thisModule.createRModelPrimaryIdentifier(CIMCRUDResource), thisModule.createLinkListProperty()}),
+			rModelHasSetter <- CIMCRUDResource.hasProperty->collect(CIMProperty | thisModule.addSetterFunction(CIMProperty))->union(Sequence{thisModule.createRModelPrimaryIdSetter(CIMCRUDResource), thisModule.createLinkListPropertySetter(PIMRModel.rModelHasProperty->select(RModelProperty | RModelProperty.name = 'linklist'))}),
+			rModelHasGetter <- CIMCRUDResource.hasProperty->collect(CIMProperty | thisModule.addGetterFunction(CIMProperty))->union(Sequence{thisModule.createRModelPrimaryIdGetter(CIMCRUDResource), thisModule.createLinkListPropertyGetter(PIMRModel.rModelHasProperty->select(RModelProperty | RModelProperty.name = 'linklist'))}),
+			isMappedToRDBMSTable <- thisModule.createRDBMSTable(CIMCRUDResource),
+			rModelHasParseFunction <- PIMRModel.rModelHasIRepresentation->collect(inputRepresentation | thisModule.createParseFunction(inputRepresentation)),
+			rModelMarshallingFunction <- PIMRModel.rModelHasOutputRepresentation->collect(outputRepresentation | thisModule.createMarshalFunction(outputRepresentation))
+		)
+}
+
+unique lazy rule createCRUDRMManager{
+	from
+		CIMCRUDResource: CIM!Resource
+	to
+		PIMRMManager: PIM!ResourceModelManager(
+			parentName <- CIMCRUDResource.name,
+			name <- CIMCRUDResource.name + 'ModelManager',
+			rMManagerHasInputRepresentation <- CIMCRUDResource.hasInputRepresentation->collect(inputRepresentation | thisModule.addRMManagerIRepresentation(inputRepresentation)),
+			rMManagerHasOutputRepresentation <- CIMCRUDResource.hasOutputRepresentation->collect(outputRepresentation | thisModule.addRMManagerORepresentation(outputRepresentation)),
+			hasRelatedModel <- thisModule.getCIMCRUDResources->select(CRUDResource | CRUDResource.name = CIMCRUDResource.name)->collect(Resource | thisModule.createCRUDRModel(Resource)),
+			hasRMManagerProperty <- thisModule.createLinkListProperty(),
+			rMManagerHasSetter <- thisModule.createLinkListPropertySetter(PIMRMManager.hasRMManagerProperty),
+			rMManagerHasGetter <- thisModule.createLinkListPropertyGetter(PIMRMManager.hasRMManagerProperty),
+			rMManagerHasParseFunction <- PIMRMManager.rMManagerHasInputRepresentation->collect(inputRepresentation | thisModule.createParseFunction(inputRepresentation)),
+			rMManagerHasMarshallingFunction <- PIMRMManager.rMManagerHasOutputRepresentation->collect(outputRepresentation | thisModule.createMarshalFunction(outputRepresentation))
+		)
+}
+
+unique lazy rule createRController{
+	from
+		CIMCRUDResource: CIM!Resource
+	to
+		PIMRController: PIM!ResourceController(
+			parentName <- CIMCRUDResource.name,
+			name <- CIMCRUDResource.name + 'Controller',
+			controllerURI <- CIMCRUDResource.createRControllerURI,
+			hasAssociatedRModel <- thisModule.createCRUDRModel(CIMCRUDResource),
+			rControllerHasCRUDActivity <- if CIMCRUDResource.hasMultipleParents = false 
+			then   
+				CIMCRUDResource.hasCRUDActivity->select(CRUDActivity | (CRUDActivity.CRUDVerb = #READ) or (CRUDActivity.CRUDVerb = #UPDATE) or (CRUDActivity.CRUDVerb = #DELETE))
+				->collect(CRUDActivity | thisModule.addRControllerCRUDActivity(CIMCRUDResource, CRUDActivity.CRUDVerb, CRUDActivity.toText + CIMCRUDResource.name, '/'))
+			else 
+				thisModule.getParentCRUDResources(CIMCRUDResource)->collect(ParentResource | 
+					CIMCRUDResource.hasCRUDActivity->select(CRUDActivity | (CRUDActivity.CRUDVerb = #READ) or (CRUDActivity.CRUDVerb = #UPDATE) or (CRUDActivity.CRUDVerb = #DELETE))
+					->collect(CRUDActivity | thisModule.addRControllerCRUDActivity(CIMCRUDResource, CRUDActivity.CRUDVerb, CRUDActivity.toText + ParentResource.name + CIMCRUDResource.name, '/' + ParentResource.name + '/{' + ParentResource.name + 'Id}/' + CIMCRUDResource.name + '/{' + if ParentResource = CIMCRUDResource then 'target' else '' endif + CIMCRUDResource.name + 'Id}')))
+			endif
+		)
+}
+
+unique lazy rule createRCManager{
+	from
+		CIMCRUDResource: CIM!Resource
+	to
+		PIMRCManager: PIM!ResourceControllerManager(
+			parentName <- CIMCRUDResource.name,
+			name <- CIMCRUDResource.name + 'ControllerManager',
+			controllerURI <- CIMCRUDResource.createRCManagerURI,
+			hasAssociatedRMManager <- thisModule.createCRUDRMManager(CIMCRUDResource),
+			rCManagerHasCRUDActivity <- if CIMCRUDResource.hasMultipleParents = false
+			then
+				CIMCRUDResource.hasCRUDActivity->select(CRUDActivity | (CRUDActivity.CRUDVerb = #CREATE) or (CRUDActivity.CRUDVerb = #READ))
+				->collect(CRUDActivity | thisModule.addRCManagerCRUDActivity(CIMCRUDResource, CRUDActivity.CRUDVerb, CRUDActivity.toText + CIMCRUDResource.name + if (CRUDActivity.CRUDVerb = #READ) then 'List' else '' endif, '/', if CIMCRUDResource.hasParent = true then thisModule.getParentCRUDResources(CIMCRUDResource).at(1) else CIMCRUDResource endif))
+			else
+				thisModule.getParentCRUDResources(CIMCRUDResource)->collect(ParentResource | 
+					CIMCRUDResource.hasCRUDActivity->select(CRUDActivity | (CRUDActivity.CRUDVerb = #CREATE) or (CRUDActivity.CRUDVerb = #READ))
+					->collect(CRUDActivity | thisModule.addRCManagerCRUDActivity(CIMCRUDResource, CRUDActivity.CRUDVerb, CRUDActivity.toText + ParentResource.name + CIMCRUDResource.name + if (CRUDActivity.CRUDVerb = #READ) then 'List' else '' endif, '/' + ParentResource.name + '/{' + ParentResource.name + 'Id}/' + CIMCRUDResource.name + '/', ParentResource)))
+			endif
+		)
+}
+
+unique lazy rule addRModelIRepresentation{
+	from
+		CIMIRepresentation: CIM!InputRepresentation
+	to
+		PIMComponentIRep: PIM!ResourceInputRepresentation(
+			inputType <- CIMIRepresentation.inputMediaType
+		)
+}
+
+unique lazy rule addRModelORepresentation{
+	from
+		CIMORepresentation: CIM!OutputRepresentation
+	to
+		PIMComponentORep: PIM!ResourceOutputRepresentation(
+			outputType <- CIMORepresentation.outputMediaType	
+		)
+}
+
+unique lazy rule addAlgoModelIRepresentation{
+	from
+		CIMIRepresentation: CIM!InputRepresentation
+	to
+		PIMComponentIRep: PIM!ResourceInputRepresentation(
+			inputType <- CIMIRepresentation.inputMediaType
+		)
+}
+
+unique lazy rule addAlgoModelORepresentation{
+	from
+		CIMORepresentation: CIM!OutputRepresentation
+	to
+		PIMComponentORep: PIM!ResourceOutputRepresentation(
+			outputType <- CIMORepresentation.outputMediaType	
+		)
+}
+
+unique lazy rule addRMManagerIRepresentation{
+	from
+		CIMIRepresentation: CIM!InputRepresentation
+	to
+		PIMComponentIRep: PIM!ResourceInputRepresentation(
+			inputType <- CIMIRepresentation.inputMediaType
+		)
+}
+
+unique lazy rule addRMManagerORepresentation{
+	from
+		CIMORepresentation: CIM!OutputRepresentation
+	to
+		PIMComponentORep: PIM!ResourceOutputRepresentation(
+			outputType <- CIMORepresentation.outputMediaType	
+		)
+}
+
+unique lazy rule addRModelProperties{
+	from
+		CIMProperty: CIM!Property
+	to
+		PIMRModelProperty: PIM!PIMComponentProperty(
+			name <- CIMProperty.name,
+			type <- CIMProperty.type,
+			isUnique <- CIMProperty.isUnique,
+			isNamingProperty <- CIMProperty.isNamingProperty,
+			isPrimaryIdentifier <- false,
+			isMappedToRDBMSColumn <- thisModule.createRDBMSTableColumn(CIMProperty)
+		)
+}
+
+lazy rule addSetterFunction{
+	from
+		CIMProperty: CIM!Property
+	to
+		PIMSetterFunction: PIM!SetterFunction(
+			name <- 'set' + CIMProperty.name,
+			setsProperty <- thisModule.addRModelProperties(CIMProperty),
+			hasFunctionParameter <- thisModule.createFunctionParameter(CIMProperty)
+		)
+}
+
+lazy rule createFunctionParameter{
+	from
+		CIMProperty: CIM!Property
+	to
+		PIMFunctionParameter: PIM!FunctionParameter(
+			name <- CIMProperty.name,
+			type <- CIMProperty.type,
+			isUnique <- CIMProperty.isUnique,
+			bIsReturnParameter <- false
+		)
+}
+
+lazy rule addGetterFunction{
+	from
+		CIMProperty: CIM!Property
+	to
+		PIMGetterFunction: PIM!GetterFunction(
+			name <- 'get' + CIMProperty.name,
+			getsProperty <- thisModule.addRModelProperties(CIMProperty),
+			hasFunctionParameter <- thisModule.createFunctionReturnParameter(CIMProperty)
+		)
+}
+
+lazy rule createFunctionReturnParameter{
+	from
+		CIMProperty: CIM!Property
+	to
+		PIMFunctionParameter: PIM!FunctionParameter(
+			name <- CIMProperty.name,
+			type <- CIMProperty.type,
+			isUnique <- CIMProperty.isUnique,
+			bIsReturnParameter <- true
+		)
+}
+
+unique lazy rule createRDBMSTable{
+	from
+		CIMCRUDResource: CIM!Resource
+	to
+		PIMRDBMSTable: PIM!RDBMSTable(
+			name <- CIMCRUDResource.name,
+			hasRDBMSColumns <- CIMCRUDResource.hasProperty
+				->collect(Property | thisModule.createRDBMSTableColumn(Property))
+				->union(Sequence{thisModule.createRDBMSTablePrimaryKey(CIMCRUDResource)})
+				->union(Sequence{thisModule.getParentCRUDResources(CIMCRUDResource)
+					->collect(ParentResource | thisModule.createRDBMSTableForeignKey(ParentResource))})
+															
+		)
+}
+
+unique lazy rule createRDBMSTableColumn{
+	from
+		CIMProperty: CIM!Property
+	to
+		Column: PIM!RDBMSTableColumn(
+			name <- CIMProperty.name,
+			type <- CIMProperty.type,
+			isForeignKey <- false,
+			isPrimaryKey <- false
+		)
+}
+
+unique lazy rule createRDBMSTablePrimaryKey{
+	from
+		CIMCRUDResource : CIM!Resource
+	to
+		PrimaryKeyColumn: PIM!RDBMSTableColumn(
+			name <- CIMCRUDResource.name + 'Id',
+			type <- 'int',
+			isForeignKey <- false,
+			isPrimaryKey <- true
+		)
+}
+
+lazy rule createRDBMSTableForeignKey{
+	from
+		CIMCRUDResource : CIM!Resource
+	to
+		ForeignKeyColumn: PIM!RDBMSTableColumn(
+			name <- if CIMCRUDResource.hasRelatedResource.includes(CIMCRUDResource) 
+					then 
+						'parent' + CIMCRUDResource.name + 'Id'
+					else 
+						CIMCRUDResource.name + 'Id' 
+					endif,
+			type <- 'int',
+			isForeignKey <- true,
+			isPrimaryKey <- false,
+			referencesRDBMSTable <- thisModule.createRDBMSTable(CIMCRUDResource)
+		)
+}
+
+rule createParseFunction(PIMIRepresentation: PIM!ResourceInputRepresentation){ 
+	to
+		PIMParseFunction: PIM!RepresentationParseFunction(
+			parsesInputRepresentation <- PIMIRepresentation	
+		)
+	do{
+		PIMParseFunction;	
+	}
+}
+
+rule createMarshalFunction(PIMORepresentation: PIM!ResourceOutputRepresentation){ 
+	to
+		PIMMarshalFunction: PIM!RepresentationMarshallingFunction(
+			marshalsRepresentation <- PIMORepresentation	
+		)
+	do{
+		PIMMarshalFunction;	
+	}
+}
+
+unique lazy rule createRModelPrimaryIdentifier{
+	from
+		CIMCRUDResource: CIM!Resource
+	to
+		PrimaryIdentifier: PIM!PIMComponentProperty(
+			name <- CIMCRUDResource.name + 'Id',
+			type <- 'int',
+			isUnique <- true,
+			isNamingProperty <- false,
+			isPrimaryIdentifier <- true
+		)
+}
+
+unique lazy rule createRModelPrimaryIdSetter{
+	from
+		CIMCRUDResource: CIM!Resource
+	to
+		PIMSetterFunction: PIM!SetterFunction(
+			name <- 'set' + CIMCRUDResource.name + 'Id',
+			setsProperty <- thisModule.createRModelPrimaryIdentifier(CIMCRUDResource)
+		)
+	do{
+		PIMSetterFunction.hasFunctionParameter <- thisModule.createRModelPrimaryIdSGParameter(CIMCRUDResource, false);
+	}
+}
+
+rule createRModelPrimaryIdSGParameter(CIMCRUDResource: CIM!Resource, isReturnParameter: Boolean){
+	to
+		PIMFunctionParameter: PIM!FunctionParameter(
+		name <- CIMCRUDResource.name + 'Id',
+		type <- 'int',
+		isUnique <- true,
+		bIsReturnParameter <- isReturnParameter
+		)
+	do{
+		PIMFunctionParameter; -- silly way of ATL called rules (imperative) to define what they return...
+	}
+}
+
+unique lazy rule createRModelPrimaryIdGetter{
+	from
+		CIMCRUDResource: CIM!Resource
+	to
+		PIMGetterFunction: PIM!GetterFunction(
+			name <- 'get' + CIMCRUDResource.name + 'Id',
+			getsProperty <- thisModule.createRModelPrimaryIdentifier(CIMCRUDResource)
+		)
+	do{
+		PIMGetterFunction.hasFunctionParameter <- thisModule.createRModelPrimaryIdSGParameter(CIMCRUDResource, true);
+	}
+}
+
+rule createLinkListProperty(){
+	to
+		LinkListProperty: PIM!PIMComponentProperty(
+			name <- 'linklist',
+			type <- 'HypermediaLink',
+			isUnique <- false
+		)
+	do{
+		LinkListProperty;	
+	}
+}
+
+rule createLinkListPropertySetter(LinkListProperty: PIM!PIMComponentProperty){
+	to
+		PIMSetterFunction: PIM!SetterFunction(
+			name <- 'setlinklist',
+			setsProperty <- LinkListProperty,
+			hasFunctionParameter <- PIMFunctionParameter
+			
+		),
+		PIMFunctionParameter: PIM!FunctionParameter(
+			name <- 'linklist',
+			type <- 'HypermediaLink',
+			isUnique <- false,
+			bIsReturnParameter <- false
+		)
+	do{
+		PIMSetterFunction;	
+	}
+}
+
+rule createLinkListPropertyGetter(LinkListProperty: PIM!PIMComponentProperty){
+	to
+		PIMGetterFunction: PIM!GetterFunction(
+			name <- 'getlinklist',
+			getsProperty <- LinkListProperty,
+			hasFunctionParameter <- PIMFunctionParameter
+			
+		),
+		PIMFunctionParameter: PIM!FunctionParameter(
+			name <- 'linklist',
+			type <- 'HypermediaLink',
+			isUnique <- false,
+			bIsReturnParameter <- true
+		)
+	do{
+		PIMGetterFunction;	
+	}
+}
+
+unique lazy rule createAlgoControllerCRUDActivity{
+	from
+		CIMAlgoResource: CIM!Resource
+	to
+		PIMAlgoControllerCRUDActivity: PIM!ResourceControllerCRUDActivity(
+			name <-  CIMAlgoResource.hasCRUDActivity->collect(CRUDActivity | CRUDActivity.toText + CIMAlgoResource.name),
+			activityURI <- '/',
+			crudVerb <- CIMAlgoResource.hasCRUDActivity->collect(CRUDActivity | CRUDActivity.CRUDVerb),
+			hasCRUDActivityHandler <- thisModule.createCRUDActivityHandler(PIMAlgoControllerCRUDActivity.name, PIMAlgoControllerCRUDActivity.crudVerb, CIMAlgoResource, 'algoController')
+		)
+}
+
+rule addRControllerCRUDActivity(CIMResource : CIM!Resource, CRUDVerb : CIM!CRUDVerb, activityName : String, activityURI : String){
+	to
+		PIMRControllerCRUDActivity: PIM!ResourceControllerCRUDActivity(
+			name <- activityName, 
+			activityURI <- activityURI,
+			crudVerb <- CRUDVerb,
+			hasCRUDActivityHandler <- thisModule.createCRUDActivityHandler(PIMRControllerCRUDActivity.name, PIMRControllerCRUDActivity.crudVerb, CIMResource, 'CRUDRController')
+		)
+	do{
+		PIMRControllerCRUDActivity;	
+	}
+}
+
+rule addRCManagerCRUDActivity(CIMResource : CIM!Resource, CRUDVerb : CIM!CRUDVerb, activityName : String, activityURI : String, ParentResource : CIM!Parent){
+	to
+		PIMRCManagerCRUDActivity: PIM!ResourceControllerCRUDActivity(
+			name <- activityName,
+			activityURI <- activityURI,
+			crudVerb <- CRUDVerb,
+			hasCRUDActivityHandler <- thisModule.createRCManagerCRUDActivityHandler(PIMRCManagerCRUDActivity.name, PIMRCManagerCRUDActivity.crudVerb, CIMResource, ParentResource)
+		)
+	do{
+		PIMRCManagerCRUDActivity;	
+	}
+}
+
+rule createCRUDActivityHandler(CRUDActivityName : String, crudVerb : CIM!CRUDVerb, CIMResource: CIM!Resource, strControllerType : String){
+	to
+		PIMCRUDActivityHandler: PIM!CRUDActivityHandler(
+			name <- CRUDActivityName + 'Handler',
+			crudVerb <- crudVerb,
+			usesDBController <- thisModule.createDatabaseController(thisModule.getCIMService)
+		)
+	do{
+		if (strControllerType = 'algoController'){
+			PIMCRUDActivityHandler.hasHypermediaFunction <- thisModule.createAlgoResourceHypermediaFunction(CIMResource);
+		}
+		else{
+			PIMCRUDActivityHandler.hasHypermediaFunction <- thisModule.createCRUDRControllerHypermediaFunction(CIMResource, crudVerb);
+		}
+		PIMCRUDActivityHandler;
+	}
+}
+
+rule createRCManagerCRUDActivityHandler(CRUDActivityName : String, crudVerb : CIM!CRUDVerb, CIMResource: CIM!Resource, ParentResource: CIM!Resource){
+	to
+		PIMCRUDActivityHandler: PIM!CRUDActivityHandler(
+			name <- if crudVerb = #CREATE then CRUDActivityName + 'Handler' else CRUDActivityName + 'Handler' endif,
+			crudVerb <- crudVerb,
+			usesDBController <- thisModule.createDatabaseController(thisModule.getCIMService)
+		)
+	do{
+		PIMCRUDActivityHandler.hasHypermediaFunction <- thisModule.createCRUDRManagerHypermediaFunction(CIMResource, ParentResource);
+		PIMCRUDActivityHandler;
+	}
+}
+
+unique lazy rule createDatabaseController{
+	from
+		RESTfulServiceCIM: CIM!RESTfulServiceCIM
+	to
+		PIMDatabaseController: PIM!DatabaseController(
+			name <- 'DatabaseController',
+			hasRDBMSActivity <- thisModule.getCIMCRUDResources
+				->collect( CIMCRUDResource | 
+					if
+						CIMCRUDResource.hasMultipleParents = false
+					then
+						CIMCRUDResource.hasCRUDActivity
+						->collect(CRUDActivity | 
+							if
+								CRUDActivity.CRUDVerb = #READ
+							then
+								Sequence{thisModule.createRDBMSActivity(CRUDActivity.toText + CIMCRUDResource.name + 'List', CRUDActivity.toRDBMSVerb, CIMCRUDResource),
+										 thisModule.createRDBMSActivity(CRUDActivity.toText + CIMCRUDResource.name, CRUDActivity.toRDBMSVerb, CIMCRUDResource)}
+							else
+								thisModule.createRDBMSActivity(CRUDActivity.toText + CIMCRUDResource.name, CRUDActivity.toRDBMSVerb, CIMCRUDResource)
+							endif)
+					else
+						CIMCRUDResource.hasCRUDActivity
+						->collect(CRUDActivity |
+							if
+								CRUDActivity.CRUDVerb = #READ
+							then
+								Sequence{thisModule.getParentCRUDResources(CIMCRUDResource)
+											->collect(ParentResource | thisModule.createRDBMSActivity(CRUDActivity.toText + ParentResource.name + CIMCRUDResource.name + 'List', CRUDActivity.toRDBMSVerb, CIMCRUDResource)),
+										 thisModule.createRDBMSActivity(CRUDActivity.toText + CIMCRUDResource.name, CRUDActivity.toRDBMSVerb, CIMCRUDResource)}
+							else
+								thisModule.createRDBMSActivity(CRUDActivity.toText + CIMCRUDResource.name, CRUDActivity.toRDBMSVerb, CIMCRUDResource)
+							endif)
+					endif)
+		)
+}
+
+rule createRDBMSActivity(RDBMSActivityName : String, RDBMSActivityVerb : PIM!RDBMSVerb, CIMCRUDResource : CIM!Resource){
+	to
+		RDBMSActivity: PIM!RDBMSActivity(
+			name <- RDBMSActivityName,
+			rdbmsVerb <- RDBMSActivityVerb,
+			altersRDBMSTable <- thisModule.createRDBMSTable(CIMCRUDResource)
+		)
+	do{
+		RDBMSActivity;	
+	}
+}
+
+unique lazy rule createAlgoResourceHypermediaFunction{
+	from
+		CIMResource : CIM!Resource
+	to
+		PIMHypermediaFunction: PIM!CreateHypermediaPIMFunction(
+			hasHypermediaLink <- CIMResource.hasCRUDActivity
+			->collect(CRUDActivity | thisModule.createHypermediaLink(CIMResource, CRUDActivity.CRUDVerb, 'algoController', #Sibling)) --create sibling hypermedia links
+			->union(Sequence{thisModule.getParentAlgoResources(CIMResource) --retrieve algo parent resources
+				->collect(AlgoResource | AlgoResource.hasCRUDActivity
+					->collect(Activity | thisModule.createHypermediaLink(AlgoResource, Activity.CRUDVerb, 'algoController', #Parent)))})
+			->union(Sequence{thisModule.getParentCRUDResources(CIMResource)
+				->collect(CRUDResource | CRUDResource.hasCRUDActivity
+					->select(CRUDActivity | (CRUDActivity.CRUDVerb = #READ) or (CRUDActivity.CRUDVerb = #UPDATE) or (CRUDActivity.CRUDVerb = #DELETE))
+						->collect(CRUDActivity | thisModule.createHypermediaLink(CRUDResource, CRUDActivity.CRUDVerb, 'CRUDRController', #Parent)))})--retrieve CRUD parent resources
+			->union(Sequence{CIMResource.getRelatedAlgoModels
+				->collect(AlgoResource | AlgoResource.hasCRUDActivity
+					->collect(CRUDActivity | thisModule.createHypermediaLink(AlgoResource, CRUDActivity.CRUDVerb, 'algoController', #Child)))})
+		)
+}
+
+rule createCRUDRControllerHypermediaFunction(CIMResource : CIM!Resource, CRUDVerb : PIM!CRUDVerb){
+	to
+		PIMHypermediaFunction: PIM!CreateHypermediaPIMFunction(
+			hasHypermediaLink <- if (CRUDVerb = #READ) or (CRUDVerb = #UPDATE) 
+			then CIMResource.hasCRUDActivity
+			->select(CRUDActivity | (CRUDActivity.CRUDVerb = #READ) or (CRUDActivity.CRUDVerb = #UPDATE) or (CRUDActivity.CRUDVerb = #DELETE))
+				->collect(CRUDActivity | thisModule.createHypermediaLink(CIMResource, CRUDActivity.CRUDVerb, 'CRUDRController', #Sibling))
+			->union(Sequence{thisModule.createHypermediaLink(CIMResource, #CREATE, 'CRUDRCManager', #Parent), 
+							 thisModule.createHypermediaLink(CIMResource, #READ, 'CRUDRCManager', #Parent)})
+			->union(Sequence{CIMResource.getRelatedAlgoModels->collect(AlgoResource | AlgoResource.hasCRUDActivity
+				->collect(CRUDActivity | thisModule.createHypermediaLink(AlgoResource, CRUDActivity.CRUDVerb, 'algoController', #Child)))})
+			->union(Sequence{CIMResource.getRelatedRMManagers
+				->collect(CRUDResource | CRUDResource.hasCRUDActivity
+					->select(CRUDActivity | (CRUDActivity.CRUDVerb = #CREATE) or (CRUDActivity.CRUDVerb = #READ))
+						->collect(CRUDActivity | thisModule.createHypermediaLink(CRUDResource, CRUDActivity.CRUDVerb, 'CRUDRCManager', #Child)))})
+			else
+				Sequence{thisModule.createHypermediaLink(CIMResource, #CREATE, 'CRUDRCManager', #Parent), 
+							 thisModule.createHypermediaLink(CIMResource, #READ, 'CRUDRCManager', #Parent)}
+			endif
+		)
+	do{
+		PIMHypermediaFunction;
+	}
+}
+
+rule createCRUDRManagerHypermediaFunction(CIMResource : CIM!Resource, ParentResource : CIM!Resource){
+	to
+		PIMHypermediaFunction: PIM!CreateHypermediaPIMFunction(
+			hasHypermediaLink <- CIMResource.hasCRUDActivity
+				->select(CRUDActivity | (CRUDActivity.CRUDVerb = #READ) or (CRUDActivity.CRUDVerb = #CREATE))
+					->collect(CRUDActivity | thisModule.createHypermediaLink(CIMResource, CRUDActivity.CRUDVerb, 'CRUDRCManager', #Sibling))
+			->union(Sequence{ CIMResource.hasCRUDActivity
+				->select(CRUDActivity | (CRUDActivity.CRUDVerb = #READ) or (CRUDActivity.CRUDVerb = #UPDATE) or (CRUDActivity.CRUDVerb = #DELETE))
+				->collect(CRUDActivity | thisModule.createHypermediaLink(CIMResource, CRUDActivity.CRUDVerb, 'CRUDRController', #Child))})
+			->union(Sequence{thisModule.getParentCRUDResources(CIMResource)
+				->select(Resource | Resource = ParentResource)
+				->collect(Resource | Resource.hasCRUDActivity
+					->select(CRUDActivity | (CRUDActivity.CRUDVerb = #READ) or (CRUDActivity.CRUDVerb = #UPDATE) or (CRUDActivity.CRUDVerb = #DELETE))
+					->collect(CRUDActivity | thisModule.createHypermediaLink(Resource, CRUDActivity.CRUDVerb, 'CRUDRController', #Parent)))})
+		)
+	do{
+		PIMHypermediaFunction;
+	}
+}
+
+rule createHypermediaLink(CIMResource : CIM!Resource, CRUDVerb : CIM!CRUDVerb, strControllerType : String, LinkType : PIM!LinkType){
+	to
+		PIMHypermediaLink : PIM!HypermediaLink(
+			linkCRUDVerb <- CRUDVerb,
+			linkType <- LinkType
+		)
+	do{
+		if (strControllerType = 'algoController'){ -- if it is algorithmic resource controller
+			PIMHypermediaLink.hasTargetAlgoController <- thisModule.createAlgoResourceController(CIMResource);
+		}
+		else {
+			if (strControllerType = 'CRUDRController'){ -- if it is CRUD resource controller
+				PIMHypermediaLink.hasTargetRController <- thisModule.createRController(CIMResource);
+			}
+			else { -- else it is a CRUD resource controller manager
+				PIMHypermediaLink.hasTargetRCManager <- thisModule.createRCManager(CIMResource);
+			}
+		}
+		PIMHypermediaLink;	
+	}
+}

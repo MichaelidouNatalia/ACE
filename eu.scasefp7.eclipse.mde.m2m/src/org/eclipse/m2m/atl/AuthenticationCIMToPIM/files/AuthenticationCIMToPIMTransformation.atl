@@ -1,0 +1,175 @@
+-- @path CORECIMIN=/CIM_Ecore_metamodel/CIMMetamodel.ecore
+-- @path AUTHPIMOUT=/AuthenticationLayer/AuthenticationPIMMetamodel.ecore
+-- @path AUTHIN=/CIM_Ecore_metamodel/AuthenticationCIMMetamodel.ecore
+-- @path COREPIMIN=/CIM_Ecore_metamodel/PIMMetamodel.ecore
+
+
+module AuthenticationCIMToPIMTransformation;
+create OUT : AUTHPIMOUT from IN : AUTHCIMIN, IN1 : CORECIMIN, IN2 : COREPIMIN;
+
+helper def: getAnnCRUDActivities : Sequence(AUTHCIMIN!AnnCRUDActivity) =
+	let AnnCRDUActivities : AUTHCIMIN!AnnCRUDActivity = AUTHCIMIN!AnnCRUDActivity.allInstances()->asSequence() in
+		AnnCRDUActivities;
+
+helper context AUTHCIMIN!AnnCRUDActivity def: getCRUDPIMCRUDActivity : COREPIMIN!ResourceControllerCRUDActivity =
+	let AllPIMResourceControllers : COREPIMIN!ResourceController = COREPIMIN!ResourceController.allInstances()->asSequence() in
+		let AllPIMRCManagers : COREPIMIN!ResourceControllerManager = COREPIMIN!ResourceControllerManager.allInstances()->asSequence() in
+			let AnnotatedPIMCRUDActivities : COREPIMIN!ResourceControllerCRUDActivity = 
+				Sequence{AllPIMResourceControllers->select(rC | rC.parentName = self.belongsToResource.name)->at(1).rControllerHasCRUDActivity
+				->select(rControllerCRUDActivity | rControllerCRUDActivity.crudVerb = self.annotatesCRUDActivity.CRUDVerb), 
+				AllPIMRCManagers->select(rCManager | rCManager.parentName = self.belongsToResource.name)->at(1).rCManagerHasCRUDActivity
+				->select(rControllerCRUDActivity | rControllerCRUDActivity.crudVerb = self.annotatesCRUDActivity.CRUDVerb)} in
+					AnnotatedPIMCRUDActivities;
+				
+helper context AUTHCIMIN!AnnCRUDActivity def: getAlgoPIMCRUDActivity : COREPIMIN!ResourceControllerCRUDActivity =
+	let AllPIMAlgoResourceControllers : COREPIMIN!AlgoResourceController = COREPIMIN!AlgoResourceController.allInstances()->asSequence() in
+		AllPIMAlgoResourceControllers->select(algoRC | algoRC.parentName = self.belongsToResource.name)->at(1).algoControllerHasCRUDActivity;
+
+helper context AUTHCIMIN!AnnCRUDActivity def: getCRUDPIMCRUDActivityHandler : Sequence(COREPIMIN!CRUDActivityHandler) =
+	Sequence{self.getCRUDPIMCRUDActivity->at(1)->collect(ResourceControllerCRUDActivity | ResourceControllerCRUDActivity.hasCRUDActivityHandler),
+			 self.getCRUDPIMCRUDActivity->at(2)->collect(RCManagerCRUDActivity | RCManagerCRUDActivity.hasCRUDActivityHandler)};
+
+helper context AUTHCIMIN!AnnCRUDActivity def: getAlgoPIMCRUDActivityHandler : Sequence(COREPIMIN!CRUDActivityHandler) =
+	self.getAlgoPIMCRUDActivity.hasCRUDActivityHandler;
+
+helper def: getPIMCoreDatabaseController : COREPIMIN!DatabaseController = 
+	let DatabaseController : COREPIMIN!DatabaseController = COREPIMIN!DatabaseController.allInstances()->asSequence()->at(1) in
+	DatabaseController;
+
+helper def: getAuthenticationModel : Sequence(AUTHCIMIN!AuthenticationModel) = 
+	let AllAuthenticationModels : AUTHCIMIN!AuthenticationModel = AUTHCIMIN!AuthenticationModel.allInstances()->asSequence() in
+		AllAuthenticationModels;
+
+helper def: getAuthenticationToken : Sequence(AUTHCIMIN!AuthenticationToken) =
+	let AuthenticationTokens : AUTHCIMIN!AuthenticationToken = AUTHCIMIN!AuthenticationToken.allInstances()->asSequence() in
+		AuthenticationTokens->select(authenticationToken | authenticationToken.oclIsTypeOf(AUTHCIMIN!Password) = false);
+
+helper def: getPasswordToken : Sequence(AUTHCIMIN!AuthenticationToken) =
+	let AuthenticationTokens : AUTHCIMIN!AuthenticationToken = AUTHCIMIN!AuthenticationToken.allInstances()->asSequence() in
+		AuthenticationTokens->select(authenticationToken | authenticationToken.oclIsTypeOf(AUTHCIMIN!Password) = true);
+
+helper def: getCIMGuestModeAnnotation : Sequence(AUTHCIMIN!GuestMode) =
+	let GuestModeAnnotations : AUTHCIMIN!GuestMode = AUTHCIMIN!GuestMode.allInstances()->asSequence() in
+		GuestModeAnnotations->select(guestModeAnnotation | guestModeAnnotation.oclIsTypeOf(AUTHCIMIN!GuestMode) = true);
+
+helper def: getCIMAuthOnlyModeAnnotation : Sequence(AUTHCIMIN!AuthenticationOnlyMode) =
+	let AuthenticationOnlyModeAnnotations : AUTHCIMIN!AuthenticationOnlyMode = AUTHCIMIN!AuthenticationOnlyMode.allInstances()->asSequence() in
+		AuthenticationOnlyModeAnnotations->select(authenticationOnlyMode | authenticationOnlyMode.oclIsTypeOf(AUTHCIMIN!AuthenticationOnlyMode) = true);
+
+helper def: getCIMBothModeAnnotation : Sequence(AUTHCIMIN!BothMode) =
+	let BothModeAnnotations : AUTHCIMIN!BothMode = AUTHCIMIN!BothMode.allInstances()->asSequence() in
+		BothModeAnnotations->select(bothModeAnnotations | bothModeAnnotations.oclIsTypeOf(AUTHCIMIN!BothMode) = true);
+	
+rule CIMToPIMAuthentication{
+	from
+		CIMAuthAnnotationModel : AUTHCIMIN!AnnotationModel
+	to
+		PIMAuthAnnotationModel : AUTHPIMOUT!AnnotationModel(
+			name <- CIMAuthAnnotationModel.name,
+			hasAnnotatedElement <- Sequence{thisModule.getAnnCRUDActivities->collect(AnnCRUDActivity | thisModule.createPIMAnnCRUDActivity(AnnCRUDActivity)),
+											thisModule.getAnnCRUDActivities->collect(AnnCRUDActivity | thisModule.createPIMAnnCRUDActivityHandler(AnnCRUDActivity)),
+											thisModule.createAnnDatabaseController(thisModule.getRESTfulServiceCIM)},
+			hasAnnotation <- Sequence{thisModule.getAuthenticationModel->collect(AuthenticationModel | thisModule.createAuthenticationPerformer(AuthenticationModel)),
+				                      thisModule.getCIMGuestModeAnnotation->collect(guestModeAnnotation | thisModule.createGuestMode(guestModeAnnotation)),
+									  thisModule.getCIMAuthOnlyModeAnnotation->collect(authOnlyModeAnnotation | thisModule.createAuthenticationOnlyMode(authOnlyModeAnnotation)),
+									  thisModule.getCIMBothModeAnnotation->collect(bothModeAnnotation | thisModule.createBothMode(bothModeAnnotation))}
+		)
+}
+
+unique lazy rule createPIMAnnCRUDActivity{
+	from
+		CIMAnnCRUDActivity : AUTHCIMIN!AnnCRUDActivity
+	to
+		PIMAnnCRUDActivity : AUTHPIMOUT!AnnCRUDActivity(
+			name <- CIMAnnCRUDActivity.name.toLower() + CIMAnnCRUDActivity.belongsToResource.name,
+			annotatesResourceControllerCRUDActivity <- if CIMAnnCRUDActivity.belongsToResource.isAlgorithmic = false 
+													   then CIMAnnCRUDActivity.getCRUDPIMCRUDActivity
+													   else CIMAnnCRUDActivity.getAlgoPIMCRUDActivity endif
+		)
+}
+
+unique lazy rule createPIMAnnCRUDActivityHandler{
+	from
+		CIMAnnCRUDActivity : AUTHCIMIN!AnnCRUDActivity
+	to
+		PIMCRUDActivityHandler : AUTHPIMOUT!AnnCRUDActivityHandler(
+			name <- CIMAnnCRUDActivity.name.toLower() + CIMAnnCRUDActivity.belongsToResource.name + 'Handler',
+			annotatesCRUDActivityHandler <- if CIMAnnCRUDActivity.belongsToResource.isAlgorithmic = false 
+											then CIMAnnCRUDActivity.getCRUDPIMCRUDActivityHandler
+											else CIMAnnCRUDActivity.getAlgoPIMCRUDActivityHandler endif
+		)
+}
+
+unique lazy rule createAnnDatabaseController{
+	from
+		CIMService : CORECIMIN!RESTfulServiceCIM
+	to
+		AnnDatabaseController : AUTHPIMOUT!AnnDatabaseController(
+				annotatesDatabaseController <- thisModule.getPIMCoreDatabaseController
+		)
+}
+
+unique lazy rule createAuthenticationPerformer{
+	from
+		AuthenticationModel : AUTHCIMIN!AuthenticationModel
+	to
+		AuthenticationPerformer : AUTHPIMOUT!AuthenticationPerformer(
+			authenticationModelName <- AuthenticationModel.ResourceAuthenticationModel.annotatesResource.name + 'Model',
+			authenticationModelParentName <- AuthenticationModel.ResourceAuthenticationModel.annotatesResource.name,
+			isSystemAuthenticationPerformer <- thisModule.createAnnDatabaseController(thisModule.getRESTfulServiceCIM),
+			hasAuthenticationToken <- Sequence{thisModule.getAuthenticationToken->collect(AuthenticationToken | thisModule.createPIMAuthenticationToken(AuthenticationToken)),
+											   thisModule.getPasswordToken->collect(passwordToken | thisModule.createPIMAuthenticationPasswordToken(passwordToken))}
+		)
+}
+
+unique lazy rule createPIMAuthenticationToken{
+	from
+		CIMAuthenticationToken : AUTHCIMIN!AuthenticationToken
+	to
+		PIMAuthenticationToken : AUTHPIMOUT!AuthenticationToken(
+			name <- CIMAuthenticationToken.name,
+			type <- CIMAuthenticationToken.type,
+			bIsUnique <- CIMAuthenticationToken.bIsUnique
+		)
+}
+
+unique lazy rule createPIMAuthenticationPasswordToken{
+	from
+		CIMAuthenticationToken : AUTHCIMIN!AuthenticationToken
+	to
+		PIMAuthenticationToken : AUTHPIMOUT!Password(
+			name <- CIMAuthenticationToken.name,
+			type <- CIMAuthenticationToken.type,
+			bIsUnique <- CIMAuthenticationToken.bIsUnique
+		)
+}
+
+unique lazy rule createGuestMode{
+	from
+		CIMGuestModeAnnotation : AUTHCIMIN!GuestMode
+	to
+		PIMGuestModeAnnotation : AUTHPIMOUT!GuestMode(
+			CRUDActivityHandlerAuthenticationMode <- thisModule.createPIMAnnCRUDActivityHandler(CIMGuestModeAnnotation.CRUDActivityAuthenticationMode),
+			CRUDActivityAuthenticationMode <- thisModule.createPIMAnnCRUDActivity(CIMGuestModeAnnotation.CRUDActivityAuthenticationMode)
+		)
+}
+
+unique lazy rule createAuthenticationOnlyMode{
+	from
+		CIMAuthenticationOnlyMode : AUTHCIMIN!AuthenticationOnlyMode
+	to
+		PIMAuthenticationOnlyMode : AUTHPIMOUT!AuthenticationOnlyMode(
+			CRUDActivityHandlerAuthenticationMode <- thisModule.createPIMAnnCRUDActivityHandler(CIMAuthenticationOnlyMode.CRUDActivityAuthenticationMode),
+			CRUDActivityAuthenticationMode <- thisModule.createPIMAnnCRUDActivity(CIMAuthenticationOnlyMode.CRUDActivityAuthenticationMode)
+		)
+}
+
+unique lazy rule createBothMode{
+	from
+		CIMBothModeAnnotation : AUTHCIMIN!BothMode
+	to
+		PIMBothModeAnnotation : AUTHPIMOUT!BothMode(
+			CRUDActivityHandlerAuthenticationMode <- thisModule.createPIMAnnCRUDActivityHandler(CIMBothModeAnnotation.CRUDActivityAuthenticationMode),
+			CRUDActivityAuthenticationMode <- thisModule.createPIMAnnCRUDActivity(CIMBothModeAnnotation.CRUDActivityAuthenticationMode)
+		)
+}

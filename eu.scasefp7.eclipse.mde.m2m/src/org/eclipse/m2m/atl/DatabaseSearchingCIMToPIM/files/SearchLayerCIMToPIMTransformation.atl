@@ -1,0 +1,162 @@
+-- @path COREPIMIN=file:/Users/IMG/Desktop/Dropbox/S-CASE-Int/Work/WP2/Task_2.2-2.3/EMF_ATL_MDE_Engine/CIM_Ecore_metamodel/PIMMetamodel.ecore
+-- @path SEARCHCIMIN=file:/Users/IMG/Desktop/Dropbox/S-CASE-Int/Work/WP2/Task_2.2-2.3/SearchLayer/SearchLayerCIMMetamodel.ecore
+-- @path CORECIMIN=file:/Users/IMG/Desktop/Dropbox/S-CASE-Int/Work/WP2/Task_2.2-2.3/EMF_ATL_MDE_Engine/CIM_Ecore_metamodel/CIMMetamodel.ecore
+-- @path SEARCHPIMOUT=file:/Users/IMG/Desktop/Dropbox/S-CASE-Int/Work/WP2/Task_2.2-2.3/SearchLayer/SearchLayerPIMMetamodel.ecore
+
+module SearchLayerCIMToPIMTransformation;
+create OUT : SEARCHPIMOUT from IN : CORECIMIN, IN1 : COREPIMIN, IN2 : SEARCHCIMIN;
+
+helper def: getAnnProperties : Sequence(SEARCHCIMIN!AnnProperty) =
+	let AllCIMAnnProperties : SEARCHCIMIN!AnnProperty = SEARCHCIMIN!AnnProperty.allInstances()->asSequence() in
+	AllCIMAnnProperties;
+
+helper context SEARCHCIMIN!AnnProperty def: getPIMComponentProperty : COREPIMIN!PIMComponentProperty =
+	let ParentCIMResource : CORECIMIN!Resource = CORECIMIN!Resource.allInstances()->asSequence()->select(CIMResource | 
+		CIMResource.hasProperty->includes(self.annotatesProperty))->at(1) in
+		let ParentPIMResourceModel : COREPIMIN!ResourceModel = COREPIMIN!ResourceModel.allInstances()->asSequence()->select(PIMResourceModel | 
+			PIMResourceModel.parentName = ParentCIMResource.name)->at(1) in
+			let AllPIMComponentProperties : COREPIMIN!PIMComponentProperty = COREPIMIN!PIMComponentProperty.allInstances()->asSequence() in
+				AllPIMComponentProperties->select(PIMComponentProperty | ParentPIMResourceModel.rModelHasProperty->includes(PIMComponentProperty)
+					and (PIMComponentProperty.name = self.annotatesProperty.name))->at(1);
+			
+helper def: getAnnAlgoResources : Sequence(SEARCHCIMIN!AnnAlgoResource) =
+	let AllAnnAlgoResources : SEARCHCIMIN!AnnAlgoResource = SEARCHCIMIN!AnnAlgoResource.allInstances()->asSequence() in
+		AllAnnAlgoResources;
+
+helper context SEARCHCIMIN!AnnAlgoResource def: getPIMAlgoResourceController : COREPIMIN!AlgoResourceController =
+	let PIMAlgoResourceController : COREPIMIN!AlgoResourceController = COREPIMIN!AlgoResourceController.allInstances()->asSequence()
+		->select(AlgoResourceController | AlgoResourceController.parentName = self.annotatesAlgoResource.name)->at(1) in
+			PIMAlgoResourceController;
+
+helper context SEARCHCIMIN!AnnAlgoResource def: getPIMCRUDActivity : COREPIMIN!ResourceControllerCRUDActivity =
+	self.getPIMAlgoResourceController.algoControllerHasCRUDActivity;
+
+helper context SEARCHCIMIN!AnnAlgoResource def: getPIMCRUDActivityHandler : COREPIMIN!CRUDActivityHandler = 
+	self.getPIMCRUDActivity.hasCRUDActivityHandler;
+
+helper def: getCIMSearchableProperties : Sequence(SEARCHCIMIN!SearchableProperty) =
+	let AllCIMSearchableProperties : SEARCHCIMIN!SearchableProperty = SEARCHCIMIN!SearchableProperty.allInstances()->asSequence() in
+		AllCIMSearchableProperties;
+
+helper def: getCIMSearchResource : Sequence(SEARCHCIMIN!SearchResource) =
+	let AllCIMSearchResources : SEARCHCIMIN!SearchResource = SEARCHCIMIN!SearchResource.allInstances()->asSequence() in
+		AllCIMSearchResources;
+
+helper context SEARCHCIMIN!AnnCRUDResource def: getPIMResourceModel : COREPIMIN!ResourceModel =
+	let PIMSearchableResourceModels : COREPIMIN!ResourceModel = COREPIMIN!ResourceModel.allInstances()->asSequence()->select(ResourceModel |
+		ResourceModel.parentName.toLower() = self.annotatesResource.name.toLower())->at(1) in
+		PIMSearchableResourceModels;
+
+helper def: getAnnCRUDResources : Sequence(SEARCHCIMIN!AnnCRUDResource) =
+	let AllAnnCRUDResources : SEARCHCIMIN!AnnCRUDResource = SEARCHCIMIN!AnnCRUDResource.allInstances()->asSequence() in
+		AllAnnCRUDResources;
+		
+
+rule SearchLayerCIMToPIM{
+	from
+		SearchLayerCIMModel : SEARCHCIMIN!AnnotationModel
+	to
+		SearchLayerPIMModel : SEARCHPIMOUT!AnnotationModel(
+			name <- SearchLayerCIMModel.name,
+			hasAnnotatedElement <- Sequence{thisModule.getAnnProperties->collect(annProperty | thisModule.createAnnPIMComponentProperty(annProperty.getPIMComponentProperty)),
+										    thisModule.getAnnAlgoResources->collect(annAlgoResource | thisModule.createAnnAlgoResourceController(annAlgoResource.getPIMAlgoResourceController)),
+											thisModule.getAnnAlgoResources->collect(annAlgoResource | thisModule.createAnnCRUDActivity(annAlgoResource.getPIMCRUDActivity)),
+											thisModule.getAnnAlgoResources->collect(annAlgoResource | thisModule.createAnnCRUDActivityHandler(annAlgoResource.getPIMCRUDActivityHandler)),
+											thisModule.getAnnCRUDResources->collect(annCRUDResource | thisModule.createAnnResourceModel(annCRUDResource.getPIMResourceModel))},
+			hasAnnotation <- Sequence{thisModule.getCIMSearchResource->collect(CIMSearchResource | thisModule.createPIMSearchController(CIMSearchResource)),
+									  thisModule.getCIMSearchResource->collect(CIMSearchResource | thisModule.createPIMSearchCRUDActivity(CIMSearchResource)),
+									  thisModule.getCIMSearchResource->collect(CIMSearchResource | thisModule.createPIMSearchCRUDActivityHandler(CIMSearchResource))}
+		)
+}
+			
+unique lazy rule createAnnPIMComponentProperty{
+	from
+		PIMComponentProperty : COREPIMIN!PIMComponentProperty
+	to
+		AnnPIMComponentProperty : SEARCHPIMOUT!AnnPIMComponentProperty(
+			annotatesPIMComponentProperty <- PIMComponentProperty	
+		)
+}
+
+unique lazy rule createAnnAlgoResourceController{
+	from
+		AlgoResourceController : COREPIMMIN!AlgoResourceController
+	to
+		AnnAlgoResourceController : SEARCHPIMOUT!AnnAlgoResourceController(
+			annotatesAlgoResourceController <- AlgoResourceController	
+		)
+}
+
+unique lazy rule createAnnCRUDActivity{
+	from
+		ResourceControllerCRUDActivity : COREPIMIN!ResourceControllerCRUDActivity
+	to
+		AnnResourceControllerCRUDActivity : SEARCHPIMOUT!AnnCRUDActivity(
+			annotatesCRUDActivity <- ResourceControllerCRUDActivity	
+		)
+}
+
+unique lazy rule createAnnCRUDActivityHandler{
+	from
+		CRUDActivityHandler : COREPIMIN!CRUDActivityHandler
+	to
+		AnnCRUDActivityHandler : SEARCHPIMOUT!AnnCRUDActivityHandler(
+			annotatesCRUDActivityHandler <- CRUDActivityHandler	
+		)
+}
+
+unique lazy rule createAnnResourceModel{
+	from
+		ResourceModel : COREPIMIN!ResourceModel
+	to
+		AnnResourceModel : SEARCHPIMOUT!AnnResourceModel(
+			annotatesResourceModel <- ResourceModel	
+		)
+}
+
+unique lazy rule createPIMSearchController{
+	from
+		CIMSearchResource : SEARCHCIMIN!SearchResource
+	to
+		PIMSearchController : SEARCHPIMOUT!SearchController(
+			isSearchAlgoController <- thisModule.createAnnAlgoResourceController(CIMSearchResource.AlgoResourceIsSearchResource.getPIMAlgoResourceController)	
+		)
+}
+
+unique lazy rule createPIMSearchCRUDActivity{
+	from
+		CIMSearchResource : SEARCHCIMIN!SearchResource
+	to
+		PIMSearchCRUDActivity : SEARCHPIMOUT!SearchCRUDActivity(
+			isSearchCRUDActivity <- thisModule.createAnnCRUDActivity(CIMSearchResource.AlgoResourceIsSearchResource.getPIMCRUDActivity)	
+		)
+}
+
+unique lazy rule createPIMSearchCRUDActivityHandler{
+	from
+		CIMSearchResource : SEARCHCIMIN!SearchResource
+	to
+		PIMSearchCRUDActivityHandler : SEARCHPIMOUT!SearchCRUDActivityHandler(
+			isSearchCRUDActivityHandler <- thisModule.createAnnCRUDActivityHandler(CIMSearchResource.AlgoResourceIsSearchResource.getPIMCRUDActivityHandler),
+			searchesResources <- CIMSearchResource.searchesResource->collect(CIMSearchableResource | thisModule.createSearchableResourceModel(CIMSearchableResource))
+		)
+}
+
+unique lazy rule createSearchableResourceModel{
+	from
+		CIMSearchableResource : SEARCHCIMIN!SearchableResource
+	to
+		SearchResourceModel : SEARCHPIMOUT!SearchableResourceModel(
+			isSearchableResourceModel <- thisModule.createAnnResourceModel(CIMSearchableResource.ResourceIsSearchable.getPIMResourceModel),
+			hasSearchableProperty <- CIMSearchableResource.hasSearchableProperty->collect(CIMSearchableProperty | thisModule.createPIMSearchableProperty(CIMSearchableProperty))
+		)
+}
+
+unique lazy rule createPIMSearchableProperty{
+	from
+		CIMSearchableProperty : SEARCHCIMIN!SearchableProperty
+	to
+		PIMSearchableProeprty : SEARCHPIMOUT!SearchableProperty(
+			isSearchableProperty <- thisModule.createAnnPIMComponentProperty(CIMSearchableProperty.PropertyIsSearchable.getPIMComponentProperty)
+		)
+}

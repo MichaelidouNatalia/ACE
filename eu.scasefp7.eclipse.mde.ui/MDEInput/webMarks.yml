@@ -1,0 +1,48 @@
+- !!eu.fp7.scase.inputParser.YamlResource
+  Name: bookmark
+  IsAlgorithmic: false
+  CRUDActivities: [Create, Read, Update, Delete]
+  InputRepresentation: JSON
+  OutputRepresentation: JSON
+  Properties:
+  - Name: url
+    Type: String
+    Unique: true
+    NamingProperty: true
+  - Name: scope
+    Type: String
+    Unique: true
+    NamingProperty: false
+  - Name: keywords
+    Type: String
+    Unique: false
+    NamingProperty: false
+  RelatedResources: []
+
+
+- !!eu.fp7.scase.inputParser.YamlResource
+  Name: bookmarkSearch
+  IsAlgorithmic: true
+  CRUDActivities: [Read]
+  InputRepresentation: JSON
+  OutputRepresentation: JSON
+  Properties: []
+  RelatedResources: []
+
+- !!eu.fp7.scase.inputParser.YamlResource
+  Name: account
+  IsAlgorithmic: false
+  CRUDActivities: [Update, Read, Create, Delete]
+  InputRepresentation: JSON
+  OutputRepresentation: JSON
+  Properties:
+  - Name: password
+    Type: String
+    Unique: true
+    NamingProperty: false
+  - Name: username
+    Type: String
+    Unique: true
+    NamingProperty: true
+  RelatedResources: [bookmark]
+

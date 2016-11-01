@@ -1,0 +1,263 @@
+-- @path COREPIMIN=platform:/plugin/eu.scasefp7.eclipse.mde.m2m/Metamodels/PIMMetamodel.ecore
+-- @path EXTCIMIN=platform:/plugin/eu.scasefp7.eclipse.mde.m2m/Metamodels/ExternalServiceLayerCIMMetamodel.ecore
+-- @path CORECIMIN=platform:/plugin/eu.scasefp7.eclipse.mde.m2m/Metamodels/CIMMetamodel.ecore
+-- @path EXTPIMOUT=platform:/plugin/eu.scasefp7.eclipse.mde.m2m/Metamodels/ExternalServiceLayerPIMMetamodel.ecore
+
+module ExternalServiceLayerCIMToPIM;
+create OUT : EXTPIMOUT from IN : CORECIMIN, IN1 : COREPIMIN, IN2 : EXTCIMIN;
+
+helper def: getAnnAlgoResource : Sequence(EXTCIMIN!AnnAlgoResource) =
+	let AllAnnAlgoResources : EXTCIMIN!AnnAlgoResource = EXTCIMIN!AnnAlgoResource.allInstances()->asSequence() in
+	AllAnnAlgoResources;
+
+helper def: getAnnCRUDResource : Sequence(EXTCIMIN!AnnCRUDResource) =
+	let AllAnnCRUDResources : EXTCIMIN!AnnCRUDResource = EXTCIMIN!AnnCRUDResource.allInstances()->asSequence() in
+	AllAnnCRUDResources;
+
+helper def: getRESTClientResource : Sequence(EXTCIMIN!RESTClientResource) =
+	let AllRESTClientResources : EXTCIMIN!RESTClientResource = EXTCIMIN!RESTClientResource.allInstances()->asSequence() in
+	AllRESTClientResources;
+
+helper context EXTCIMIN!AnnAlgoResource def: getAlgoResourceController : COREPIMIN!AlgoResourceController =
+	let ParentCIMResource : CORECIMIN!Resource = CORECIMIN!Resource.allInstances()->asSequence()->select(CIMResource | 
+		CIMResource.name = self.annotatesAlgoResource.name)->at(1) in
+		let PIMAlgoResourceController : COREPIMIN!AlgoResourceController = COREPIMIN!AlgoResourceController.allInstances()->asSequence()->select(algoResourceController | 
+			algoResourceController.parentName = ParentCIMResource.name)->at(1) in
+			PIMAlgoResourceController;
+		
+helper context EXTCIMIN!AnnCRUDResource def: getResourceModel : COREPIMIN!ResourceModel =
+	let ParentCIMResource : CORECIMIN!Resource = CORECIMIN!Resource.allInstances()->asSequence()->select(CIMResource | 
+		CIMResource.name = self.annotatesCRUDResource.name)->at(1) in
+		let PIMResourceModel : COREPIMIN!ResourceMomdel = COREPIMIN!ResourceModel.allInstances()->asSequence()->select(resourceModel | 
+			resourceModel.parentName = ParentCIMResource.name)->at(1) in
+			PIMResourceModel;
+		
+
+rule ExternalServiceLayerLayerCIMToPIM{
+	from
+		ExternalServiceLayerCIMModel : EXTCIMIN!AnnotationModel
+	to
+		ExternalServiceLayerPIMModel : EXTPIMOUT!AnnotationModel(
+			name <- ExternalServiceLayerCIMModel.name,
+			hasAnnotatedElement <- Sequence{thisModule.getAnnAlgoResource->collect(annAlgoResource | thisModule.createAnnAlgoResourceController(annAlgoResource.getAlgoResourceController)),
+											thisModule.getAnnAlgoResource->collect(annAlgoResource | thisModule.createAnnCRUDActivity(annAlgoResource.getAlgoResourceController)),
+											thisModule.getAnnAlgoResource->collect(annAlgoResource | thisModule.createAnnCRUDActivityHandler(annAlgoResource.getAlgoResourceController)),
+											thisModule.getAnnAlgoResource->collect(annAlgoResource | thisModule.createAnnAlgoResourceModel(annAlgoResource.getAlgoResourceController)),
+											thisModule.getAnnCRUDResource->collect(annCRUDResource | thisModule.createAnnResourceModel(annCRUDResource.getResourceModel))},
+			hasAnnotation <- Sequence{thisModule.getRESTClientResource->collect(CIMRESTClientResource | thisModule.createRESTClientModel(CIMRESTClientResource)),
+									  thisModule.getRESTClientResource->collect(CIMRESTClientResource | thisModule.createRESTClientController(CIMRESTClientResource))}
+		)
+}
+
+unique lazy rule createAnnAlgoResourceController{
+	from
+		PIMAlgoResourceController : COREPIMIN!AlgoResourceController
+	to
+		AnnAlgoResourceController : EXTPIMOUT!AnnAlgoResourceController(
+			annotatesAlgoResourceController <- PIMAlgoResourceController
+		)
+}
+
+unique lazy rule createAnnCRUDActivity{
+	from
+		PIMAlgoResourceController : COREPIMIN!AlgoResourceController
+	to
+		AnnCRUDActivity : EXTPIMOUT!AnnCRUDActivity(
+			annotatesCRUDActivity <- PIMAlgoResourceController.algoControllerHasCRUDActivity
+		)
+}
+
+unique lazy rule createAnnCRUDActivityHandler{
+	from
+		PIMAlgoResourceController : COREPIMIN!AlgoResourceController
+	to
+		AnnCRUDActivityHandler : EXTPIMOUT!AnnCRUDActivityHandler(
+			annotatesCRUDActivityHandler <- PIMAlgoResourceController.algoControllerHasCRUDActivity.hasCRUDActivityHandler
+		)
+}
+
+unique lazy rule createAnnAlgoResourceModel{
+	from
+		PIMAlgoResourceController : COREPIMIN!AlgoResourceController
+	to
+		AnnAlgoResourceModel : EXTPIMOUT!AnnAlgoResourceModel(
+			annotatesAlgoResourceModel <- PIMAlgoResourceController.hasAssociatedAlgoModel
+		)
+}
+
+unique lazy rule createAnnResourceModel{
+	from
+		PIMResourceModel : COREPIMIN!ResourceModel
+	to
+		AnnResourceModel : EXTPIMOUT!AnnResourceModel(
+			annotatesResourceModel <- PIMResourceModel
+		)
+}
+
+unique lazy rule createRESTClientModel{
+	from
+		CIMRESTClientResource : EXTCIMIN!RESTClientResource
+	to
+		RESTClientModel : EXTPIMOUT!RESTClientModel(
+			isRESTClientModel <- thisModule.createAnnAlgoResourceModel(CIMRESTClientResource.isRESTClientResource.getAlgoResourceController)
+		)
+	do{
+		if (CIMRESTClientResource.targetsService.hasInputDataModel.oclIsUndefined() = false){
+			RESTClientModel.hasInputDataModel <- thisModule.createInputDataModel(CIMRESTClientResource.targetsService.hasInputDataModel);
+		}
+		if (CIMRESTClientResource.targetsService.hasOutputDataModel.oclIsTypeOf(EXTCIMIN!AutoPersistentOutput) = true){
+			RESTClientModel.hasOutputDataModel <- thisModule.createAutoPersistentOutputDataModel(CIMRESTClientResource.targetsService.hasOutputDataModel);
+		}
+		else if (CIMRESTClientResource.targetsService.hasOutputDataModel.oclIsTypeOf(EXTCIMIN!ExistentCRUDPersistentOutput) = true){
+			RESTClientModel.hasOutputDataModel <- thisModule.createExistentCRUDPersistentOutputDataModel(CIMRESTClientResource.targetsService.hasOutputDataModel);
+		}
+		else if (CIMRESTClientResource.targetsService.hasOutputDataModel.oclIsTypeOf(EXTCIMIN!NonPersistentOutput) = true){
+			RESTClientModel.hasOutputDataModel <- thisModule.createNonPersistentOutputDataModel(CIMRESTClientResource.targetsService.hasOutputDataModel);
+		}
+		RESTClientModel;
+	}
+}
+
+unique lazy rule createInputDataModel{
+	from
+		CIMInputDataModel : EXTCIMIN!InputDataModel
+	to
+		PIMInputDataModel : EXTPIMOUT!InputDataModel(
+			hasInputProperty <- CIMInputDataModel.hasInputProperties->collect(inputProperty | thisModule.createProperty(inputProperty)),
+			hasInputRepresentation <- thisModule.createRepresentation(CIMInputDataModel.hasInputRepresentation)
+		)
+}
+
+unique lazy rule createAutoPersistentOutputDataModel{
+	from
+		CIMOutputDataModel : EXTCIMIN!OutputDataModel
+	to
+		AutoPersistentOutput : EXTPIMOUT!AutoPersistentOutput(
+			hasOutputProperty <- CIMOutputDataModel.hasOutputProperties->collect(outputProperty | thisModule.createProperty(outputProperty)),
+			hasOutputRepresentation <- thisModule.createRepresentation(CIMOutputDataModel.hasOutputRepresentation)
+		)
+}
+
+unique lazy rule createExistentCRUDPersistentOutputDataModel{
+	from
+		CIMOutputDataModel : EXTCIMIN!OutputDataModel
+	to
+		ExistentCRUDPersistentOutput : EXTPIMOUT!ExistentCRUDPersistentOutput(
+			hasOutputProperty <- CIMOutputDataModel.hasOutputProperties->collect(outputProperty | thisModule.createProperty(outputProperty)),
+			hasOutputRepresentation <- thisModule.createRepresentation(CIMOutputDataModel.hasOutputRepresentation),
+			isExistentCRUDPersistentOutput <- thisModule.createAnnResourceModel(CIMOutputDataModel.isExistentCRUDPersistentOutput.getResourceModel)
+		)
+}
+
+unique lazy rule createNonPersistentOutputDataModel{
+	from
+		CIMOutputDataModel : EXTCIMIN!OutputDataModel
+	to
+		NonPersistentOutput : EXTPIMOUT!NonPersistentOutput(
+			hasOutputProperty <- CIMOutputDataModel.hasOutputProperties->collect(outputProperty | thisModule.createProperty(outputProperty)),
+			hasOutputRepresentation <- thisModule.createRepresentation(CIMOutputDataModel.hasOutputRepresentation)
+		)
+}
+
+unique lazy rule createProperty{
+	from
+		CIMProperty : EXTCIMIN!ModelProperty
+	to
+		PIMProperty : EXTPIMOUT!Property(
+			name <- CIMProperty.name,
+			type <- CIMProperty.type,
+			isUnique <- CIMProperty.isUnique,
+			hasPrimitiveType <- CIMProperty.hasPrimitiveType
+		)
+	do{
+		if (CIMProperty.hasComplexType.oclIsUndefined() = false){
+			PIMProperty.hasComplexType <- thisModule.createComplexType(CIMProperty.hasComplexType);
+		}
+
+		PIMProperty;
+	}
+}
+
+unique lazy rule createRepresentation{
+	from
+		CIMRepresentation : EXTCIMIN!Representation
+	to
+		PIMRepresentation : EXTPIMOUT!Representation(
+			name <- CIMRepresentation.name
+		)
+}
+
+unique lazy rule createRESTClientController{
+	from
+		CIMRESTClientResource : EXTCIMIN!RESTClientResource
+	to
+		RESTClientController : EXTPIMOUT!RESTClientController(
+			isRESTClientController <- thisModule.createAnnAlgoResourceController(CIMRESTClientResource.isRESTClientResource.getAlgoResourceController),
+			hasRESTClientCRUDActivity <- thisModule.createRESTClientCRUDActivity(CIMRESTClientResource),
+			hasAssociatedClientModel <- thisModule.createRESTClientModel(CIMRESTClientResource),
+			hasComplexTypes <- CIMRESTClientResource.isRESTClientComplexType->collect(complexType | thisModule.createComplexType(complexType))
+		)
+}
+
+unique lazy rule createComplexType{
+	from
+		CIMComplexType : EXTCIMIN!ComplexType
+	to
+		ComplexType : EXTPIMOUT!ComplexType(
+			complexTypeName <- CIMComplexType.complexTypeName,
+			hasComplexTypeProperties <- CIMComplexType.hasComplexTypeProperties->collect(complexTypeProperty | thisModule.createComplexTypeProperty(complexTypeProperty))
+		)
+}
+
+unique lazy rule createComplexTypeProperty{
+	from
+		CIMComplexTypeProperty : EXTCIMIN!ComplexTypeProperty
+	to
+		ComplexTypeProperty : EXTPIMOUT!ComplexTypeProperty(
+			name <- CIMComplexTypeProperty.name,
+			isUnique <- CIMComplexTypeProperty.isUnique,
+			type <- CIMComplexTypeProperty.type,
+			hasPrimitiveType <- CIMComplexTypeProperty.hasPrimitiveType
+		)
+	do{
+		if (CIMComplexTypeProperty.propertyHasComplexType.oclIsUndefined() = false){
+			ComplexTypeProperty.propertyHasComplexType <- thisModule.createComplexType(CIMComplexTypeProperty.propertyHasComplexType);
+		}
+
+		ComplexTypeProperty;
+	}
+}
+
+unique lazy rule createRESTClientCRUDActivity{
+	from
+		CIMRESTClientResource : EXTCIMIN!RESTClientResource
+	to
+		RESTClientCRUDActivity : EXTPIMOUT!RESTClientCRUDActivity(
+			isRESTClientCRUDActivity <- thisModule.createAnnCRUDActivity(CIMRESTClientResource.isRESTClientResource.getAlgoResourceController),
+			hasRESTClientCRUDActivityHandler <- thisModule.createRESTClientCRUDActivityHandler(CIMRESTClientResource),
+			hasQueryParam <- CIMRESTClientResource.targetsService.hasQueryParam->collect(queryParam | thisModule.createQueryParam(queryParam))
+		)
+}
+
+unique lazy rule createQueryParam{
+	from
+		CIMQueryParam : EXTCIMIN!QueryParam
+	to
+		PIMQueryParam : EXTPIMOUT!QueryParam(
+			name <- CIMQueryParam.name,
+			type <- CIMQueryParam.type,
+			isAuthToken <- CIMQueryParam.isAuthToken,
+			authTokenToURL <- CIMQueryParam.authTokenToURL
+		)
+}
+
+unique lazy rule createRESTClientCRUDActivityHandler{
+	from
+		CIMRESTClientResource : EXTCIMIN!RESTClientResource
+	to
+		RESTClientCRUDActivityHandler : EXTPIMOUT!RESTClientCRUDActivityHandler(
+			isRESTClientCRUDActivityHandler <- thisModule.createAnnCRUDActivityHandler(CIMRESTClientResource.isRESTClientResource.getAlgoResourceController),
+			targetServiceURL <- CIMRESTClientResource.targetsService.targetURL,
+			CRUDVerb <- CIMRESTClientResource.targetsService.CRUDVerb
+		)
+}

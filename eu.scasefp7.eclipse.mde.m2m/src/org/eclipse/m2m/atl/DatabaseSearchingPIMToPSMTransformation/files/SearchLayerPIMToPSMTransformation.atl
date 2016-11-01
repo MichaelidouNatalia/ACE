@@ -1,0 +1,204 @@
+-- @path COREPSMIN=file:/Users/IMG/Desktop/Dropbox/S-CASE-Int/Work/WP2/Task_2.2-2.3/EMF_ATL_MDE_Engine/CIM_Ecore_metamodel/PSMMetamodel.ecore
+-- @path COREPIMIN=file:/Users/IMG/Desktop/Dropbox/S-CASE-Int/Work/WP2/Task_2.2-2.3/EMF_ATL_MDE_Engine/CIM_Ecore_metamodel/PIMMetamodel.ecore
+-- @path SEARCHPSMOUT=file:/Users/IMG/Desktop/Dropbox/S-CASE-Int/Work/WP2/Task_2.2-2.3/SearchLayer/SearchLayerPSMMetamodel.ecore
+-- @path SEARCHPIMIN=file:/Users/IMG/Desktop/Dropbox/S-CASE-Int/Work/WP2/Task_2.2-2.3/SearchLayer/SearchLayerPIMMetamodel.ecore
+
+module SearchLayerPIMToPSMTransformation;
+create OUT : SEARCHPSMOUT from IN : COREPIMIN, IN1 : COREPSMIN, IN2 : SEARCHPIMIN;
+
+helper def: getRESTfulServicePSM : COREPSMIN!ServicePSM =
+	let RESTfulServicePSM : COREPSMIN!ServicePSM = COREPSMIN!ServicePSM.allInstances()->asSequence() in
+		RESTfulServicePSM->at(1);
+
+helper def: getAnnPIMComponentProperty : Sequence(SEARCHPIMIN!AnnPIMComponentProperty) =
+	let AllAnnPIMComponentProperties : SEARCHPIMIN!AnnPIMComponentProperty = SEARCHPIMIN!AnnPIMComponentProperty.allInstances()->asSequence() in
+		AllAnnPIMComponentProperties;
+
+helper context SEARCHPIMIN!AnnPIMComponentProperty def: getPSMComponentProperty : COREPSMIN!PSMComponentProperty = 
+	let ParentPIMResourceModel : COREPIMIN!ResourceModel = COREPIMIN!ResourceModel.allInstances()->asSequence()->select(rModel | 
+		rModel.rModelHasProperty->includes(self.annotatesPIMComponentProperty))->at(1) in
+		let ParentPSMResourceModel : COREPSMIN!JavaResourceModel = COREPSMIN!JavaResourceModel.allInstances()->asSequence()->select(jRModel |
+			jRModel.parentName = ParentPIMResourceModel.parentName)->at(1) in
+			let PSMComponentProperty : COREPSMIN!PSMComponentProperty = COREPSMIN!PSMComponentProperty.allInstances()->asSequence()->select( PSMComponentProperty |
+				ParentPSMResourceModel.JavaRModelHasProperty->includes(PSMComponentProperty) and 
+				(self.annotatesPIMComponentProperty.name = PSMComponentProperty.name))->at(1) in
+					PSMComponentProperty ;
+			
+helper def: getAnnAlgoResourceController : Sequence(SEARCHPIMIN!AnnAlgoResourceController) =
+	let AllAnnAlgoResourceControllers : SEARCHPIMIN!AnnAlgoResourceController = SEARCHPIMIN!AnnAlgoResourceController.allInstances().asSequence() in
+		AllAnnAlgoResourceControllers;
+
+helper def: convertCRUDToHTTPVerb(CRUDVerbString : String) : String =
+	if
+		CRUDVerbString.substring(1,1) = 'c'  -- then it is create verb and has to be converted to post http verb
+	then
+		'post' + CRUDVerbString.substring(7, CRUDVerbString.size())
+	else
+		if
+			CRUDVerbString.substring(1,1) = 'r' -- then it is read verb and has to be converted to get http verb
+		then
+			'get' + CRUDVerbString.substring(5, CRUDVerbString.size())
+		else
+			if
+				CRUDVerbString.substring(1,1) = 'u' -- then it is update verb and has to be converted to put http verb
+			then
+				'put' + CRUDVerbString.substring(7, CRUDVerbString.size())
+			else
+				 CRUDVerbString -- delete remains the same
+			endif
+		endif
+	endif;
+
+helper context SEARCHPIMIN!AnnAlgoResourceController def: getJavaAlgoController : COREPSMIN!JavaAlgoResourceController =
+	let JavaAlgoController : COREPSMIN!JavaAlgoResourceController = COREPSMIN!JavaAlgoResourceController.allInstances()->asSequence()->select(jAlgoController |
+		jAlgoController.parentName = self.annotatesAlgoResourceController.parentName)->at(1) in
+		JavaAlgoController;
+
+helper def: getAnnCRUDActivity : Sequence(SEARCHPIMIN!AnnCRUDActivity) =
+	let AllAnnCRUDActivities : SEARCHPIMIN!AnnCRUDActivity = SEARCHPIMIN!AnnCRUDActivity.allInstances()->asSequence() in
+		AllAnnCRUDActivities;
+
+helper def: getHTTPActivity(HTTPActivityName : String) : CORESPSMIN!HTTPActivity =
+	let HTTPActivity : COREPSMIN!HTTPActivity = COREPSMIN!HTTPActivity.allInstances()->asSequence()->select(httpActivity |
+		httpActivity.name.toLower() = HTTPActivityName.toLower())->at(1) in
+		HTTPActivity;
+
+helper def: getAnnCRUDActivityHandler : Sequence(SEARCHPIMIN!AnnCRUDActivityHandler) =
+	let AllAnnCRUDActivityHandlers : SEARCHPIMIN!AnnCRUDActivityHandler = SEARCHPIMIN!AnnCRUDActivityHandler.allInstances()->asSequence() in
+		AllAnnCRUDActivityHandlers;
+
+helper def: getHTTPActivityHandler(HTTPActivityHandlerName : String) : COREPSMIN!HTTPActivityHandler =
+	let HTTPActivityHandler : COREPSMIN!HTTPActivityHandler = COREPSMIN!HTTPActivityHandler.allInstances()->asSequence()->select(HTTPActivityHandler |
+		HTTPActivityHandler.name.toLower() = HTTPActivityHandlerName.toLower())->at(1) in
+		HTTPActivityHandler;
+
+helper def: getPIMSearchController : Sequence(SEARCHPIMIN!SearchController) =
+	let AllPIMSearchController : SEARCHPIMIN!SearchController = SEARCHPIMIN!SearchController.allInstances()->asSequence() in
+		AllPIMSearchController;
+
+helper def: getSearchCRUDActivity : Sequence(SEARCHPIMIN!SearchCRUDActivity) =
+	let AllSearchCRUDActivities : SEARCHPIMIN!SearchCRUDActivity = SEARCHPIMIN!SearchCRUDActivity.allInstances()->asSequence() in
+		AllSearchCRUDActivities;
+
+helper def: getSearchCRUDActivityHandler : Sequence(SEARCHPIMIN!SearchCRUDActivityHandler) = 
+	let AllSearchCRUDActivityHandlers : SEARCHPIMIN!SearchCRUDACtivityHandler = SEARCHPIMIN!SearchCRUDActivityHandler.allInstances()->asSequence() in
+		AllSearchCRUDActivityHandlers;
+
+helper def: getAnnResourceModel : Sequence(SEARCHPIMIN!AnnResourceModel) =
+	let AllAnnResourceModels : SEARCHPIMIN!AnnResourceModel = SEARCHPIMIN!AnnResourceModel.allInstances()->asSequence() in
+		AllAnnResourceModels;
+
+helper context SEARCHPIMIN!AnnResourceModel def: getJavaResourceModel : COREPSMIN!JavaResourceModel =
+	let JavaResourceModel : COREPSMIN!JavaResourceModel = COREPSMIN!JavaResourceModel.allInstances()->asSequence()->select(jRModel |
+		jRModel.parentName = self.annotatesResourceModel.parentName)->at(1) in
+		JavaResourceModel;
+
+rule SearchLayerPIMToPSM{
+	from
+		SearchLayerPIMModel : SEARCHPIMIN!AnnotationModel
+	to
+		SearchLayerPSMModel : SEARCHPSMOUT!AnnotationModel(
+			name <- SearchLayerPIMModel.name,
+			annotatesRESTfulServicePSM <- thisModule.getRESTfulServicePSM,
+			hasAnnotatedElement <- Sequence{thisModule.getAnnPIMComponentProperty->collect(annPIMComponentProperty | thisModule.createAnnPSMComponentProperty(annPIMComponentProperty)),
+											thisModule.getAnnAlgoResourceController->collect(annAlgoResourceController | thisModule.createAnnJavaAlgoController(annAlgoResourceController)),
+											thisModule.getAnnCRUDActivity->collect(annCRUDActivity | thisModule.createAnnHTTPActivity(annCRUDActivity)),
+											thisModule.getAnnCRUDActivityHandler->collect(annCRUDActivityHandler | thisModule.createAnnHTTPActivityHandler(annCRUDActivityHandler)),
+											thisModule.getAnnResourceModel->collect(annResourceModel | thisModule.createAnnJavaResourceModel(annResourceModel))},
+			hasAnnotation <- Sequence{thisModule.getPIMSearchController->collect(PIMSearchController | thisModule.createPSMSearchController(PIMSearchController)),
+									  thisModule.getSearchCRUDActivity->collect(searchCRUDActivity | thisModule.createSearchHTTPActivity(searchCRUDActivity)),
+									  thisModule.getSearchCRUDActivityHandler->collect(searchCRUDActivityHandler | thisModule.createSearchHTTPActivityHandler(searchCRUDActivityHandler))}
+		)
+}
+
+unique lazy rule createAnnPSMComponentProperty{
+	from 
+		AnnPIMComponentProperty : SEARCHPIMIN!AnnPIMComponentProperty
+	to
+		AnnPSMComponentProperty : SEARCHPSMOUT!AnnPSMComponentProperty(
+			annotatesPSMComponentProperty <- AnnPIMComponentProperty.getPSMComponentProperty	
+		)
+}
+
+unique lazy rule createAnnJavaAlgoController{
+	from
+		AnnAlgoResourceController : SEARCHPIMIN!AnnAlgoResourceController
+	to
+		AnnJavaAlgoResourceController : SEARCHPSMOUT!AnnJavaAlgoController(
+			annotatesJavaAlgoController <- AnnAlgoResourceController.getJavaAlgoController
+		)
+}
+
+unique lazy rule createAnnHTTPActivity{
+	from
+		AnnCRUDActivity : SEARCHPIMIN!AnnCRUDActivity
+	to
+		AnnHTTPActivity : SEARCHPSMOUT!AnnHTTPActivity(
+			annotatesHTTPActivity <- thisModule.getHTTPActivity(thisModule.convertCRUDToHTTPVerb(AnnCRUDActivity.annotatesCRUDActivity.name))	
+		)
+}
+
+unique lazy rule createAnnHTTPActivityHandler{
+	from
+		AnnCRUDActivityHandler : SEARCHPIMIN!AnnCRUDActivityHandler
+	to
+		AnnHTTPActivityHandler : SEARCHPSMOUT!AnnHTTPActivityHandler(
+			annotatesHTTPActivityHandler <- thisModule.getHTTPActivityHandler(thisModule.convertCRUDToHTTPVerb(AnnCRUDActivityHandler.annotatesCRUDActivityHandler.name))	
+		)
+}
+
+unique lazy rule createAnnJavaResourceModel{
+	from
+		AnnResourceModel : SEARCHPIMIN!AnnResourceModel
+	to
+		AnnJavaResourceModel : SEARCHPSMOUT!AnnJavaResourceModel(
+			annotatesJavaResourceModel <- AnnResourceModel.getJavaResourceModel	
+		)
+}
+
+unique lazy rule createPSMSearchController{
+	from
+		PIMSearchController : SEARCHPIMIN!SearchController
+	to
+		PSMSearchController : SEARCHPSMOUT!SearchController(
+			isSearchController <- thisModule.createAnnJavaAlgoController(PIMSearchController.isSearchAlgoController)	
+		)
+}
+
+unique lazy rule createSearchHTTPActivity{
+	from
+		SearchCRUDActivity : SEARCHPIMIN!SearchCRUDActivity
+	to
+		SearchHTTPActivity : SEARCHPSMOUT!SearchHTTPActivity(
+			isSearchHTTPActivity <- thisModule.createAnnHTTPActivity(SearchCRUDActivity.isSearchCRUDActivity)	
+		)
+}
+
+unique lazy rule createSearchHTTPActivityHandler{
+	from
+		SearchCRUDActivityHandler : SEARCHPIMIN!SearchCRUDActivityHandler
+	to
+		SearchHTTPActivityHandler : SEARCHPSMOUT!SearchHTTPHandler(
+			isHTTPActivityHandler <- thisModule.createAnnHTTPActivityHandler(SearchCRUDActivityHandler.isSearchCRUDActivityHandler),
+			searchesJavaResourceModel <- SearchCRUDActivityHandler.searchesResources->collect(PIMSearchableResource | thisModule.createPSMSearchableResource(PIMSearchableResource))
+		)
+}
+
+unique lazy rule createPSMSearchableResource{
+	from
+		PIMSearchableResource : SEARCHPIMIN!SearchableResourceModel
+	to
+		PSMSearchableResource : SEARCHPSMOUT!SearchableJavaResourceModel(
+			isSearchableJavaResourceModel <- thisModule.createAnnJavaResourceModel(PIMSearchableResource.isSearchableResourceModel),
+			hasSearchableProperty <- PIMSearchableResource.hasSearchableProperty->collect(PIMSearchableProperty | thisModule.createPSMSearchableProperty(PIMSearchableProperty))
+		)
+}
+
+unique lazy rule createPSMSearchableProperty{
+	from
+		PIMSearchableProperty : SEARCHPIMIN!SearchableProperty
+	to
+		PSMSearchableProperty : SEARCHPSMOUT!SearchableProperty(
+			isSearchableProperty <- thisModule.createAnnPSMComponentProperty(PIMSearchableProperty.isSearchableProperty)	
+		)
+}

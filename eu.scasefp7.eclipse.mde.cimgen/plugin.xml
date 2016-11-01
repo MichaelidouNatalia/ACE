@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?eclipse version="3.4"?>
+<plugin>
+
+   <extension
+         point="org.eclipse.ui.commands">
+      <category
+            name="MDE Input Parser"
+            id="eu.scasefp7.eclipse.mde.cimgen.commands.category">
+      </category>
+      <command
+            name="CIM Generator"
+            categoryId="eu.scasefp7.eclipse.mde.cimgen.commands.category"
+            id="eu.scasefp7.eclipse.mde.cimgen.commands.CIMGeneratorCommand">
+         <commandParameter id="YamlFilePath" name="YAML file path"/>
+         <commandParameter id="WebServiceName" name="Web service name"/>
+         <commandParameter id="MDEOutputFolder" name="Output folder"/>
+         <commandParameter id="DatabaseIP" name="Database IP"/>
+         <commandParameter id="DatabasePort" name="Database port"/>
+         <commandParameter id="DatabaseUsername" name="Database username"/>
+         <commandParameter id="DatabasePassword" name="Database password"/>
+         <commandParameter id="DatabaseType" name="Database type"/>
+         <commandParameter id="DBMigration" name="Migrate database" optional="true"/>
+         <commandParameter id="Authentication" name="Generate authentication"/>
+         <commandParameter id="Authorization" name="Generate authorization"/>
+         <commandParameter id="DatabaseSearching" name="Generate searching"/>
+         <commandParameter id="ExternalComposition" name="Include external composition"/>
+         <commandParameter id="ReloadExistingModels" name="Reload previously configured models" optional="true"/>
+      </command>
+   </extension>
+   <extension
+         point="org.eclipse.ui.handlers">
+      <handler
+            commandId="eu.scasefp7.eclipse.mde.cimgen.commands.CIMGeneratorCommand"
+            class="eu.fp7.scase.launcher.cimgenerator.handlers.CIMGenerator">
+      </handler>
+   </extension>
+   
+   <extension point="org.eclipse.emf.ecore.generated_package">
+      <!-- @generated CIMMetamodel -->
+      <package
+            uri="platform:/plugin/eu.scasefp7.eclipse.mde.m2m/Metamodels/CIMMetamodel.ecore"
+            class="ServiceCIM.ServiceCIMPackage"/>
+      <!--  genModel="Metamodels/CIMMetamodel.genmodel" -->
+ 
+      <!-- @generated AuthenticationLayerCIMMetamodel -->
+      <package
+            uri="platform:/plugin/eu.scasefp7.eclipse.mde.m2m/Metamodels/AuthenticationCIMMetamodel.ecore"
+            class="AuthenticationLayerCIM.AuthenticationLayerCIMPackage"/>
+      <!--  genModel="Metamodels/AuthenticationLayerCIMMetamodel.genmodel" -->
+ 
+      <!-- @generated SearchLayerCIMMetamodel -->
+      <package
+            uri="platform:/plugin/eu.scasefp7.eclipse.mde.m2m/Metamodels/SearchLayerCIMMetamodel.ecore"
+            class="SearchLayerCIM.SearchLayerCIMPackage"/>
+      <!--  genModel="Metamodels/SearchLayerCIMMetamodel.genmodel" -->
+ 
+   </extension>
+
+</plugin>

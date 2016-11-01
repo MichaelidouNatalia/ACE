@@ -1,0 +1,293 @@
+-- @path COREPSMIN=/eu.scasefp7.eclipse.mde.m2m/Metamodels/PSMMetamodel.ecore
+-- @path COREPIMIN=/eu.scasefp7.eclipse.mde.m2m/Metamodels/PIMMetamodel.ecore
+-- @path ABACPSMOUT=/ABACAuthorizationPSM/model/AuthorizationLayerPSM.ecore
+-- @path ABACPIMIN=/ABACAuthorizationPIM/model/AuthorizationLayerPIM.ecore
+
+module ABACAuthorizationPIMToPSMTransformation;
+create OUT : ABACPSMOUT from IN : ABACPIMIN, IN1 : COREPIMIN, IN2 : COREPSMIN;
+
+helper def: getJPAController : COREPSMIN!HibernateController =
+	let JPAController : COREPSMIN!HibernateController = COREPSMIN!HibernateController.allInstances()->asSequence() in
+		JPAController->at(1);
+
+helper def: getPIMAnnCRUDActivities : Sequence(ABACPIMIN!AnnResourceControllerCRUDActivity) =
+	let AnnCRDUActivities : ABACPIMIN!AnnResourceControllerCRUDActivity = ABACPIMIN!AnnResourceControllerCRUDActivity.allInstances()->asSequence() in
+		AnnCRDUActivities;
+
+helper def: getHTTPActivityByName(HTTPActivityName : String) : COREPSMIN!HTTPActivity =
+	let AllHTTPActivities : COREPSMIN!HTTPActivity = COREPSMIN!HTTPActivity.allInstances()->asSequence() in
+		AllHTTPActivities->select(HTTPActivity | HTTPActivity.name.toLower() = HTTPActivityName.toLower())->at(1);
+
+helper def: getPIMAnnCRUDActivityHandlers : Sequence(ABACPIMIN!AnnCRUDActivityHandler) =
+	let AnnCRUDActivityHandlers : ABACPIMIN!AnnCRUDActivityHandler = ABACPIMIN!AnnCRUDActivityHandler.allInstances()->asSequence() in
+		AnnCRUDActivityHandlers;
+
+helper def: getHTTPActivityHandlerByName(HTTPActivityHandlerName : String) : COREPSMIN!HTTPActivityHandler =
+	let AllHTTPActivityHandlers : COREPSMIN!HTTPActivityHandler = COREPSMIN!HTTPActivityHandler.allInstances()->asSequence() in
+		AllHTTPActivityHandlers->select(HTTPActivityHandler | HTTPActivityHandler.name.toLower() = HTTPActivityHandlerName.toLower())->at(1);
+
+helper def: getPIMAnnResourceModels : Sequence(ABACPIMIN!AnnResourceModel) =
+	let AnnResourceModels : ABACPIMIN!AnnResourceModel = ABACPIMIN!AnnResourceModel.allInstances()->asSequence() in
+		AnnResourceModels;
+
+helper context ABACPIMIN!AnnResourceModel def: getJavaResourceModel : COREPSMIN!JavaResourceModel =
+	let JavaResourceModel : COREPSMIN!JavaResourceModel = COREPSMIN!JavaResourceModel.allInstances()->asSequence()->select(jRModel |
+		jRModel.parentName = self.annotatesResourceModel.parentName)->at(1) in
+		JavaResourceModel;
+
+helper def: getPIMAnnAlgoResourceModels : Sequence(ABACPIMIN!AnnAlgoResourceModel) =
+	let AnnAlgoResourceModels : ABACPIMIN!AnnAlgoResourceModel = ABACPIMIN!AnnAlgoResourceModel.allInstances()->asSequence() in
+		AnnAlgoResourceModels;
+
+helper context ABACPIMIN!AnnAlgoResourceModel def: getJavaAlgoResourceModel : COREPSMIN!JavaAlgoResourceModel =
+	let JavaAlgoResourceModel : COREPSMIN!JavaResourceModel = COREPSMIN!JavaAlgoResourceModel.allInstances()->asSequence()->select(jRModel |
+		jRModel.parentName = self.annotatesAlgoResourceModel.parentName)->at(1) in
+		JavaAlgoResourceModel;
+
+helper def: getPIMAnnPIMComponentProperties : Sequence(ABACPIMIN!AnnPIMComponentProperty) =
+	let AllAnnPIMComponentProperties : ABACPIMIN!AnnPIMComponentProperty = ABACPIMIN!AnnPIMComponentProperty.allInstances()->asSequence() in
+		AllAnnPIMComponentProperties;
+
+helper context ABACPIMIN!AnnPIMComponentProperty def: getPSMComponentProperty : COREPSMIN!PSMComponentProperty = 
+	let ParentPIMResourceModel : COREPIMIN!ResourceModel = COREPIMIN!ResourceModel.allInstances()->asSequence()->select(rModel | 
+		rModel.rModelHasProperty->includes(self.annotatesPIMComponentProperty))->at(1) in
+		let ParentPSMResourceModel : COREPSMIN!JavaResourceModel = COREPSMIN!JavaResourceModel.allInstances()->asSequence()->select(jRModel |
+			jRModel.parentName = ParentPIMResourceModel.parentName)->at(1) in
+			let PSMComponentProperty : COREPSMIN!PSMComponentProperty = COREPSMIN!PSMComponentProperty.allInstances()->asSequence()->select( PSMComponentProperty |
+				ParentPSMResourceModel.JavaRModelHasProperty->includes(PSMComponentProperty) and 
+				(self.annotatesPIMComponentProperty.name = PSMComponentProperty.name))->at(1) in
+					PSMComponentProperty ;
+
+helper def: convertCRUDToHTTPVerb(CRUDVerbString : String) : String =
+	if
+		CRUDVerbString.substring(1,1) = 'c'  -- then it is create verb and has to be converted to post http verb
+	then
+		'post' + CRUDVerbString.substring(7, CRUDVerbString.size())
+	else
+		if
+			CRUDVerbString.substring(1,1) = 'r' -- then it is read verb and has to be converted to get http verb
+		then
+			'get' + CRUDVerbString.substring(5, CRUDVerbString.size())
+		else
+			if
+				CRUDVerbString.substring(1,1) = 'u' -- then it is update verb and has to be converted to put http verb
+			then
+				'put' + CRUDVerbString.substring(7, CRUDVerbString.size())
+			else
+				 CRUDVerbString -- delete remains the same
+			endif
+		endif
+	endif;
+
+rule PIMToPSMAuthentication{
+	from
+		PIMAnnotationModel : ABACPIMIN!AnnotationModel
+	to
+		PSMAnnotationModel : ABACPSMOUT!AnnotationModel(
+			name <- PIMAnnotationModel.name,
+			hasAnnotatedElement <- Sequence{thisModule.createAnnJPAController(thisModule.getJPAController),
+											thisModule.getPIMAnnCRUDActivities->collect(PIMAnnCRUDActivity | thisModule.createAnnHTTPActivity(PIMAnnCRUDActivity.annotatesControllerCRUDActivity)),
+											thisModule.getPIMAnnCRUDActivityHandlers->collect(PIMAnnCRUDActivityHandler | thisModule.createAnnHTTPActivityHandler(PIMAnnCRUDActivityHandler.annotatesCRUDActivityHandler)),
+											thisModule.getPIMAnnResourceModels->collect(PIMAnnResourceModel | thisModule.createAnnJavaResourceModel(PIMAnnResourceModel)),
+											thisModule.getPIMAnnAlgoResourceModels->collect(PIMAnnAlgoResourceModel | thisModule.createAnnJavaAlgoResourceModel(PIMAnnAlgoResourceModel)),
+											thisModule.getPIMAnnPIMComponentProperties->collect(AnnPIMCompontentProperty | thisModule.createAnnPSMComponentProperty(AnnPIMCompontentProperty))},
+			hasAnnotation <- PIMAnnotationModel.hasAnnotation
+			
+		)
+}
+
+unique lazy rule createAnnJPAController{
+	from
+		HibernateController : COREPSMIN!HibernateController
+	to
+		AnnJPAController : ABACPSMOUT!AnnJPAController(
+			annotatesJPAController <- HibernateController
+		)
+}
+
+unique lazy rule createAnnHTTPActivity{
+	from
+		PIMCRUDActivity : COREPIMIN!CRUDActivity
+	to
+		AnnHTTPActivity : ABACPSMOUT!AnnHTTPActivity(
+			annotatesHTTPActivity <- thisModule.getHTTPActivityByName(thisModule.convertCRUDToHTTPVerb(PIMCRUDActivity.name))	
+		)
+}
+
+unique lazy rule createAnnHTTPActivityHandler{
+	from
+		PIMCRUDActivityHandler : COREPIMIN!CRUDActivityHandler
+	to
+		AnnHTTPActivityHandler : ABACPSMOUT!AnnHTTPActivityHandler(
+			annotatesHTTPActivityHandler <- thisModule.getHTTPActivityHandlerByName(thisModule.convertCRUDToHTTPVerb(PIMCRUDActivityHandler.name))	
+		)
+}
+
+unique lazy rule createAnnJavaResourceModel{
+	from
+		AnnPIMResourceModel : ABACPIMIN!AnnResourceModel
+	to
+		AnnJavaResourceModel : ABACPSMOUT!AnnJavaResourceModel(
+			annotatesJavaResourceModel <- AnnPIMResourceModel.getJavaResourceModel
+			)
+}
+
+unique lazy rule createAnnJavaAlgoResourceModel{
+	from
+		AnnPIMALgoResourceModel : ABACPIMIN!AnnAlgoResourceModel
+	to
+		AnnJavaAlgoResourceModel : ABACPSMOUT!AnnJavaAlgoResourceModel(
+			annotatesJavaLagoResourceModel <- AnnPIMALgoResourceModel.getJavaAlgoResourceModel
+			)
+}
+
+unique lazy rule createAnnPSMComponentProperty{
+	from
+		AnnPIMComponentProperty : ABACPIMIN!AnnPIMComponentProperty
+	to
+		AnnPSMComponentProperty : ABACPSMOUT!AnnPSMComponentProperty(
+			annotatesPSMComponentProperty <- AnnPIMComponentProperty.getPSMComponentProperty
+			)
+}
+
+rule PIMToPSMAuhtorizableResource{
+	from
+		PIMAuthorizableResource : ABACPIMIN!AuthorizableResource
+	to
+		PSMAuthorizableResource : ABACPSMOUT!AuthorizableResource(
+			isAuthorizableResourceModel <- if PIMAuthorizableResource.isAuthorizableResourceModel.oclIsUndefined()
+										   then OclUndefined
+										   else thisModule.createAnnJavaResourceModel(PIMAuthorizableResource.isAuthorizableResourceModel)
+										   endif,
+			isAuthorizableAlgoModel  <- if PIMAuthorizableResource.isAuthorizableAlgoResourceModel.oclIsUndefined()
+										   then OclUndefined
+										   else thisModule.createAnnJavaAlgoResourceModel(PIMAuthorizableResource.isAuthorizableAlgoResourceModel)
+										   endif,
+			isAuthorizableModelManager  <- if PIMAuthorizableResource.isAuthorizableResourceModelManager.oclIsUndefined()
+										   then OclUndefined
+										   else thisModule.createAnnJavaAlgoResourceModel(PIMAuthorizableResource.isAuthorizableResourceModelManager)
+										   endif,			
+			bTrackOwnership <- PIMAuthorizableResource.bTrackOwnership,
+			hasResourceAccessPolicySet <- PIMAuthorizableResource.hasResourceAccessPolicySet,
+			hasAuthorizationPerformer <- PIMAuthorizableResource.hasAuthorizationPerformer
+			)
+}
+
+rule PIMToPSMResourceAccessPolicySet{
+	from
+		PIMResourceAccessPolicySet : ABACPIMIN!ResourceAccessPolicySet
+	to
+		PSMResourceAccessPolicySet : ABACPSMOUT!ResourceAccessPolicySet(
+			policyCombiningAlgorithm <- PIMResourceAccessPolicySet.policyCombiningAlgorithm,
+			hasResourceAccessPolicySet <- PIMResourceAccessPolicySet.hasResourceAccessPolicySet,
+			hasResourceAccessPolicy <- PIMResourceAccessPolicySet.hasResourceAccessPolicy
+			)
+}
+
+rule PIMToPSMResourceAccessPolicy{
+	from
+		PIMResourceAccessPolicy : ABACPIMIN!ResourceAccessPolicy
+	to
+		PSMResourceAccessPolicy : ABACPSMOUT!ResourceAccessPolicy(
+			hasResourceAccessRule <- PIMResourceAccessPolicy.hasResourceAccessRule,
+			ruleCombiningAlgorithm <- PIMResourceAccessPolicy.ruleCombiningAlgorithm,
+			hasApplyCondition <- PIMResourceAccessPolicy.hasApplyCondition
+			)
+}
+
+rule PIMToPSMResourceAccessRule{
+	from
+		PIMResourceAccessRule : ABACPIMIN!ResourceAccessRule
+	to
+		PSMResourceAccessRule : ABACPSMOUT!ResourceAccessRule(
+			hasAllowedAction <- PIMResourceAccessRule.hasAllowedAction,
+			ruleType <- PIMResourceAccessRule.ruleType,
+			hasMatchCondition <- PIMResourceAccessRule.hasMatchCondition
+			)
+}
+
+rule PIMToPSMAllowedAction{
+	from
+		PIMAllowedAction : ABACPIMIN!AllowedAction
+	to
+		PSMAllowedAction : ABACPSMOUT!AllowedAction(
+			isAllowedAction <- thisModule.createAnnHTTPActivity(PIMAllowedAction.isAllowedAction.annotatesControllerCRUDActivity)
+			)
+}
+
+
+rule PIMToPSMCondition{
+	from
+		PIMCondition : ABACPIMIN!Condition
+	to
+		PSMCondition : ABACPSMOUT!Condition(
+			operator <- PIMCondition.operator,
+			hasLeftSideOperand <- PIMCondition.hasLeftSideOperand,
+			hasRightSideOperand <- PIMCondition.hasRightSideOperand
+			)
+}
+
+rule PIMToPSMAttribute{
+	from
+		PIMAttribute : ABACPIMIN!Attribute
+	to
+		PSMAttribute : ABACPSMOUT!Attribute(
+			attributeCategory <- PIMAttribute.attributeCategory,
+			value <- PIMAttribute.value,
+			isAttributeNewProperty <- PIMAttribute.isAttributeNewProperty,
+			isAttributeExistingProperty <- if PIMAttribute.isAttributeExistingProperty.oclIsUndefined()
+											then OclUndefined
+											else thisModule.createAnnPSMComponentProperty(PIMAttribute.isAttributeExistingProperty)
+											endif							
+			)
+}
+
+rule PIMToPSMNewProperty{
+	from 
+		PIMNewProperty : ABACPIMIN!NewProperty
+	to
+		PSMNewProperty : ABACPSMOUT!NewProperty(
+			name <- PIMNewProperty.name,
+			type <- PIMNewProperty.type,
+			bIsUnique <- PIMNewProperty.bIsUnique,
+			belongsToResource <- thisModule.createAnnJavaResourceModel(PIMNewProperty.belongsToResource)
+		)
+}
+
+rule PIMToPSMAuthorizationPerformer{
+	from
+		PIMAuthorizationPerformer : ABACPIMIN!AuthorizationPerformer
+	to
+		PSMAuthorizationPerformer : ABACPSMOUT!AuthorizationPerformer(
+			isAuthorizationPerformer <- PIMAuthorizationPerformer.isAuthorizationPerformer->collect(handler | thisModule.createAnnHTTPActivityHandler(handler.annotatesCRUDActivityHandler)),
+			usesAuthorizationPolicyEvaluator <- PIMAuthorizationPerformer.usesAuthorizationPolicyEvaluator
+				
+		)
+}
+
+rule PIMToPSMAuthorizationPolicyEvaluator{
+	from
+		PIMAuthorizationPolicyEvaluator : ABACPIMIN!AuthorizationPolicyEvaluator
+	to
+		PSMAuthorizationPolicyEvaluator : ABACPSMOUT!AuthorizationPolicyEvaluator(
+			accesses <- PIMAuthorizationPolicyEvaluator.accesses
+		)
+}
+
+rule PIMToPSMAuthorizationDataHandler{
+	from
+		PIMAuthorizationDataHandler : ABACPIMIN!AuthorizationDataHandler
+	to
+		PSMAuthorizationDataHandler : ABACPSMOUT!AuthorizationDataHandler(
+			isAuthorizationDataHandler <- thisModule.createAnnJPAController(thisModule.getJPAController)
+		)
+}
+
+rule PIMToPSMAuthorizationSubject{
+	from
+		PIMAuthorizationSubject : ABACPIMIN!AuthorizationSubject
+	to
+		PSMAuthorizationSubject : ABACPSMOUT!AuthorizationSubject(
+			isAuthorizationSubject <- thisModule.createAnnJavaResourceModel(PIMAuthorizationSubject.isAuthorizationSubject)
+			)
+}

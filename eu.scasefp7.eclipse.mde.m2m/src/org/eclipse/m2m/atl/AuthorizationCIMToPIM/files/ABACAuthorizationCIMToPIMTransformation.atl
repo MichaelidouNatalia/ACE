@@ -1,0 +1,544 @@
+-- @path CORECIMIN=/eu.scasefp7.eclipse.mde.m2m/Metamodels/CIMMetamodel.ecore
+-- @path ABACCIMIN=/eu.scasefp7.eclipse.mde.m2m/Metamodels/AuthorizationLayerCIM.ecore
+-- @path ABACPIMOUT=/eu.scasefp7.eclipse.mde.m2m/Metamodels/AuthorizationLayerPIM.ecore
+-- @path COREPIMIN=/eu.scasefp7.eclipse.mde.m2m/Metamodels/PIMMetamodel.ecore
+
+module ABACAuthorizationCIMToPIMTransformation;
+create OUT : ABACPIMOUT from IN : ABACCIMIN, IN1 : CORECIMIN, IN2 : COREPIMIN;
+
+helper def: getAnnCRUDActivities : Sequence(ABACCIMIN!AnnCRUDActivity) =
+	let AnnCRDUActivities : ABACCIMIN!AnnCRUDActivity = ABACCIMIN!AnnCRUDActivity.allInstances()->asSequence() in
+		AnnCRDUActivities;
+
+
+
+helper def: getAnnProperties : Sequence(ABACCIMIN!AnnProperty) =
+	let AllCIMAnnProperties : ABACCIMIN!AnnProperty = ABACCIMIN!AnnProperty.allInstances()->asSequence() in
+	AllCIMAnnProperties;
+
+helper def : getAnnResources : Sequence(ABACCIMIN!AnnResource) = 
+	let AllCIMAnnResources : ABACCIMIN!AnnResource = ABACCIMIN!AnnResource.allInstances()->asSequence() in
+	AllCIMAnnResources;
+
+helper def : getAuthorizableResources : Sequence(ABACCIMIN!AuthorizableResource) = 
+	let AllCIMAuthorizableResources : ABACCIMIN!AuthorizableResource = ABACCIMIN!AuthorizableResource.allInstances()->asSequence() in
+	AllCIMAuthorizableResources;
+
+helper def : getNewProperties : Sequence(ABACCIMIN!NewProperty) = 
+	let AllNewProperties : ABACCIMIN!NewProperty = ABACCIMIN!NewProperty.allInstances()->asSequence() in
+	AllNewProperties;
+
+helper def : getAuthorizationSubject : ABACCIMIN!AuthorizationSubject = 
+	ABACCIMIN!AuthorizationSubject.allInstances()->first();
+
+helper context ABACCIMIN!AnnCRUDActivity def: getCRUDPIMCRUDActivity : COREPIMIN!ResourceControllerCRUDActivity =
+	let AllPIMResourceControllers : COREPIMIN!ResourceController = COREPIMIN!ResourceController.allInstances()->asSequence() in
+		let AllPIMRCManagers : COREPIMIN!ResourceControllerManager = COREPIMIN!ResourceControllerManager.allInstances()->asSequence() in
+			let AnnotatedPIMCRUDActivities : COREPIMIN!ResourceControllerCRUDActivity = 
+				Sequence{AllPIMResourceControllers->select(rC | rC.parentName = self.annotatesCRUDActivity.refImmediateComposite().name)->at(1).rControllerHasCRUDActivity
+				->select(rControllerCRUDActivity | rControllerCRUDActivity.crudVerb = self.annotatesCRUDActivity.CRUDVerb), 
+				AllPIMRCManagers->select(rCManager | rCManager.parentName = self.annotatesCRUDActivity.refImmediateComposite().name)->at(1).rCManagerHasCRUDActivity
+				->select(rControllerCRUDActivity | rControllerCRUDActivity.crudVerb = self.annotatesCRUDActivity.CRUDVerb)} in
+					if self.annotatesCRUDActivity.CRUDVerb = #CREATE
+					then AnnotatedPIMCRUDActivities->at(2)->first()
+					else AnnotatedPIMCRUDActivities->at(1)->first()
+					endif;
+				
+helper context ABACCIMIN!AnnCRUDActivity def: getAlgoPIMCRUDActivity : COREPIMIN!ResourceControllerCRUDActivity =
+	let AllPIMAlgoResourceControllers : COREPIMIN!AlgoResourceController = COREPIMIN!AlgoResourceController.allInstances()->asSequence() in
+		AllPIMAlgoResourceControllers->select(algoRC | algoRC.parentName = self.annotatesCRUDActivity.refImmediateComposite().name)->first().algoControllerHasCRUDActivity;
+
+helper context ABACCIMIN!AnnCRUDActivity def: getCRUDPIMCRUDActivityHandler : Sequence(COREPIMIN!CRUDActivityHandler) =
+	self.getCRUDPIMCRUDActivity.hasCRUDActivityHandler;
+
+helper context ABACCIMIN!AnnCRUDActivity def: getAlgoPIMCRUDActivityHandler : Sequence(COREPIMIN!CRUDActivityHandler) =
+	self.getAlgoPIMCRUDActivity.hasCRUDActivityHandler;
+
+helper context ABACCIMIN!AnnProperty def: getPIMComponentProperty : COREPIMIN!PIMComponentProperty =
+	let ParentCIMResource : CORECIMIN!Resource = CORECIMIN!Resource.allInstances()->asSequence()->select(CIMResource | 
+		CIMResource.hasProperty->includes(self.annotatesProperty))->at(1) in
+		let ParentPIMResourceModel : COREPIMIN!ResourceModel = COREPIMIN!ResourceModel.allInstances()->asSequence()->select(PIMResourceModel | 
+			PIMResourceModel.parentName = ParentCIMResource.name)->at(1) in
+			let AllPIMComponentProperties : COREPIMIN!PIMComponentProperty = COREPIMIN!PIMComponentProperty.allInstances()->asSequence() in
+				AllPIMComponentProperties->select(PIMComponentProperty | ParentPIMResourceModel.rModelHasProperty->includes(PIMComponentProperty)
+					and (PIMComponentProperty.name = self.annotatesProperty.name))->at(1);
+
+helper context ABACCIMIN!AnnResource def: getPIMResourceModel : COREPIMIN!ResourceModel =
+	let PIMResourceModels : COREPIMIN!ResourceModel = COREPIMIN!ResourceModel.allInstances()->asSequence()->select(ResourceModel |
+		ResourceModel.parentName.toLower() = self.annotatesResource.name.toLower())->at(1) in
+		PIMResourceModels;
+
+helper context ABACCIMIN!AnnResource def : getPIMResourceModelManager : COREPIMIN!ResourceModel =
+	let PIMResourceModelManagers : COREPIMIN!ResourceModelManager = COREPIMIN!ResourceModelManager.allInstances()->asSequence()->select(ResourceModelManager |
+		ResourceModelManager.parentName.toLower() = self.annotatesResource.name.toLower())->at(1) in
+		PIMResourceModelManagers;
+
+helper context ABACCIMIN!AnnResource def: getPIMAlgoResourceModel : COREPIMIN!AlgoResourceModel =
+	let PIMAlgoResourceModels : COREPIMIN!AlgoResourceModel = COREPIMIN!AlgoResourceModel.allInstances()->asSequence()->select(AlgoResourceModel |
+		AlgoResourceModel.parentName.toLower() = self.annotatesResource.name.toLower())->at(1) in
+		PIMAlgoResourceModels;
+
+helper def: getAttributeResourcePIMIds : OrderedSet(COREPIMIN!PIMComponentProperty) =
+	ABACCIMIN!Attribute.allInstances() -> select(Attribute | not Attribute.isAttributeResource.oclIsUndefined())
+	-> collect(Attribute | Attribute.isAttributeResource.getPIMResourceModel.rModelHasProperty -> select(p | p.isPrimaryIdentifier)) 
+	-> flatten()->asOrderedSet();
+
+rule CIMToPIMAuhtorization{
+	from
+		CIMAbacAnnotationModel :ABACCIMIN!AnnotationModel
+	to
+		PIMAbacAnnotationModel : ABACPIMOUT!AnnotationModel(
+			name <- CIMAbacAnnotationModel.name,
+			hasAnnotatedElement <- Sequence{thisModule.getAnnCRUDActivities -> collect(AnnCRUDActivity | thisModule.createPIMAnnCRUDActivity(AnnCRUDActivity)),
+											thisModule.getAnnProperties -> collect(annProperty | thisModule.createAnnPIMComponentProperty(annProperty.getPIMComponentProperty)),
+											thisModule.getAttributeResourcePIMIds -> collect(PIMProperty | thisModule.createAnnPIMComponentProperty(PIMProperty)),
+											thisModule.getAnnResources -> select(AnnResource | not AnnResource.annotatesResource.isAlgorithmic) -> collect(annResource | thisModule.createAnnResourceModel(annResource.getPIMResourceModel)),
+										    thisModule.getAnnResources -> select(AnnResource | not AnnResource.annotatesResource.isAlgorithmic) -> collect(annResource | thisModule.createAnnRMManager(annResource.getPIMResourceModelManager)),
+											thisModule.getAnnResources -> select(AnnResource | AnnResource.annotatesResource.isAlgorithmic) -> collect(annResource | thisModule.createAnnAlgoResourceModel(annResource.getPIMAlgoResourceModel)),
+											thisModule.createAnnDatabaseController(COREPIMIN!DatabaseController.allInstances()->first()),
+											thisModule.getAnnCRUDActivities -> collect(AnnCRUDActivity | thisModule.createPIMAnnCRUDActivityHandler(AnnCRUDActivity))},
+			hasAnnotation <- Sequence{thisModule.getAuthorizableResources -> collect(AuthorizableResource | thisModule.createPIMAuthorizableResource(AuthorizableResource)),
+									  thisModule.createAuthorizationSubject(thisModule.getAuthorizationSubject),
+									  thisModule.getAuthorizableResources -> collect(AuthorizableResource | thisModule.createAuthorizationPerformer(AuthorizableResource)),
+									  thisModule.createAuhtorizationDataHandler(COREPIMIN!DatabaseController.allInstances()->first()),
+									  thisModule.createPolicyEvaluator(ABACCIMIN!AnnotationModel.allInstances()->first()),
+									  thisModule.getNewProperties -> collect(PIMNewProperty | thisModule.createNewProperty(PIMNewProperty))}
+			)
+}
+
+unique lazy rule createPIMAnnCRUDActivity{
+	from
+		CIMAnnCRUDActivity : ABACCIMIN!AnnCRUDActivity
+	to
+		PIMAnnCRUDActivity : ABACPIMOUT!AnnResourceControllerCRUDActivity(
+			name <- CIMAnnCRUDActivity.annotatesCRUDActivity.CRUDVerb.toString(),
+			annotatesControllerCRUDActivity <- if CIMAnnCRUDActivity.annotatesCRUDActivity.refImmediateComposite().isAlgorithmic = false 
+													   then CIMAnnCRUDActivity.getCRUDPIMCRUDActivity
+													   else CIMAnnCRUDActivity.getAlgoPIMCRUDActivity endif
+		)
+}
+
+unique lazy rule createAnnPIMComponentProperty{
+	from
+		PIMComponentProperty : COREPIMIN!PIMComponentProperty
+	to
+		AnnPIMComponentProperty : ABACPIMOUT!AnnPIMComponentProperty(
+			name <- PIMComponentProperty.type +' : '+PIMComponentProperty.name,
+			annotatesPIMComponentProperty <- PIMComponentProperty	
+		)
+}
+
+unique lazy rule createAnnResourceModel{
+	from
+		ResourceModel : COREPIMIN!ResourceModel
+	to
+		AnnResourceModel : ABACPIMOUT!AnnResourceModel(
+			annotatesResourceModel <- ResourceModel	
+		)
+}
+
+unique lazy rule createAnnAlgoResourceModel{
+	from
+		AlgoResourceModel : COREPIMIN!AlgoResourceModel
+	to
+		AnnAlgoResourceModel : ABACPIMOUT!AnnAlgoResourceModel(
+			 annotatesAlgoResourceModel <- AlgoResourceModel	
+		)
+}
+
+
+unique lazy rule createAnnRMManager{
+	from
+		ResourceModelManager : COREPIMIN!ResourceModelManager
+	to
+		AnnResourceModelManager : ABACPIMOUT!AnnResourceModelManager(
+			annotatesResourceModelManager <- ResourceModelManager
+		)
+}
+
+unique lazy rule createPIMAnnCRUDActivityHandler{
+	from
+		CIMAnnCRUDActivity : ABACCIMIN!AnnCRUDActivity
+	to
+		PIMCRUDActivityHandler : ABACPIMOUT!AnnCRUDActivityHandler(
+			annotatesCRUDActivityHandler <- if CIMAnnCRUDActivity.annotatesCRUDActivity.refImmediateComposite().isAlgorithmic = false 
+											then CIMAnnCRUDActivity.getCRUDPIMCRUDActivityHandler
+											else CIMAnnCRUDActivity.getAlgoPIMCRUDActivityHandler endif
+		)
+}
+
+unique lazy rule createAnnDatabaseController{
+	from
+		DatabaseController : COREPIMIN!DatabaseController
+	to
+		AnnDatabaseController : ABACPIMOUT!AnnDatabaseController(
+			annotatesDatabaseController <- DatabaseController
+		)
+}
+
+unique lazy rule createPIMAuthorizableResource{
+	from
+		CIMAuthorizableResource : ABACCIMIN!AuthorizableResource
+	to
+		PIMAuhtorizableResource : ABACPIMOUT!AuthorizableResource(
+			bTrackOwnership <- CIMAuthorizableResource.bTrackOwnership,
+			isAuthorizableResourceModel <- if CIMAuthorizableResource.isAuthorizableResource.annotatesResource.isAlgorithmic
+										then OclUndefined
+										else thisModule.createAnnResourceModel(CIMAuthorizableResource.isAuthorizableResource.getPIMResourceModel)
+										endif,
+			isAuthorizableAlgoResourceModel <- if CIMAuthorizableResource.isAuthorizableResource.annotatesResource.isAlgorithmic
+										then thisModule.createAnnAlgoResourceModel(CIMAuthorizableResource.isAuthorizableResource.getPIMAlgoResourceModel)
+										else OclUndefined
+										endif,
+			hasResourceAccessPolicySet <- CIMAuthorizableResource.hasResourceAccessPolicySet,
+			hasAuthorizationPerformer <- thisModule.createAuthorizationPerformer(CIMAuthorizableResource)
+		)
+}
+
+rule CIMToPIMResourceAccessPolicySet{
+	from 
+		CIMPolicySet : ABACCIMIN!ResourceAccessPolicySet
+	to
+		PIMPolicySet : ABACPIMOUT!ResourceAccessPolicySet(
+			hasResourceAccessPolicySet <- CIMPolicySet.hasResourceAccessPolicySet,
+			policyCombiningAlgorithm <- CIMPolicySet.policyCombiningAlgorithm,
+			hasResourceAccessPolicy <- CIMPolicySet.hasResourceAccessPolicy,
+			policySetIsMappedToAuthorizationTable <- thisModule.createPolicySetDataTable(COREPIMIN!DatabaseController.allInstances()->first())
+		)
+		
+}
+
+rule CIMToPIMResourceAccessPolicy{
+	from 
+		CIMPolicy : ABACCIMIN!ResourceAccessPolicy
+	to
+		PIMPolicy : ABACPIMOUT!ResourceAccessPolicy(
+			ruleCombiningAlgorithm <- CIMPolicy.ruleCombiningAlgorithm,
+			hasResourceAccessRule <- CIMPolicy.hasResourceAccessRule,
+			hasApplyCondition <- CIMPolicy.hasApplyCondition,
+			policyIsMappedToAuthorizationTable <- thisModule.createPolicyDataTable(COREPIMIN!DatabaseController.allInstances()->first())
+		)
+		
+}
+
+rule CIMToPIMResourceAccessRule{
+	from 
+		CIMRule : ABACCIMIN!ResourceAccessRule
+	to
+		PIMRule : ABACPIMOUT!ResourceAccessRule(
+			ruleType <- CIMRule.ruleType,
+			hasMatchCondition <- CIMRule.hasMatchCondition,
+			hasAllowedAction <- CIMRule.hasAllowedAction,
+			ruleIsMappedToAuthorizationTable <- thisModule.createRuleDataTable(COREPIMIN!DatabaseController.allInstances()->first())
+		)
+		
+}
+
+rule CIMToPIMAllowedAction{
+	from 
+		CIMAllowedAction : ABACCIMIN!AllowedAction
+	to
+		PIMAllowedAction : ABACPIMOUT!AllowedAction(
+			isAllowedAction <- thisModule.createPIMAnnCRUDActivity(CIMAllowedAction.isAllowedAction)
+		)
+		
+}
+
+rule CIMToPIMCondition{
+	from 
+		CIMCondition : ABACCIMIN!Condition
+	to
+		PIMCondition : ABACPIMOUT!Condition(
+			operator <- CIMCondition.operator,
+			hasLeftSideOperand <- CIMCondition.hasLeftSideOperand,
+			hasRightSideOperand <- CIMCondition.hasRightSideOperand,
+			conditionIsMappedToAuthorizationTable <- Sequence {thisModule.createConditionDataTable(COREPIMIN!DatabaseController.allInstances()->first()),
+															thisModule.createValuesDataTable(COREPIMIN!DatabaseController.allInstances()->first())}
+			)
+}
+
+rule CIMToPIMAttributeProperty{
+	from 
+		CIMAttribute : ABACCIMIN!Attribute(CIMAttribute.isAttributeResource.oclIsUndefined())
+	to
+		PIMAttribute : ABACPIMOUT!Attribute(
+			attributeCategory <- CIMAttribute.attributeCategory,
+			value <- CIMAttribute.value,
+			isAttributeNewProperty <- if not CIMAttribute.isAttributeNewProperty.oclIsUndefined()
+										then thisModule.createNewProperty(CIMAttribute.isAttributeNewProperty)
+										else OclUndefined
+										endif,
+			isAttributeExistingProperty <- if not CIMAttribute.isAttributeExistingProperty.oclIsUndefined()
+										then thisModule.createAnnPIMComponentProperty(CIMAttribute.isAttributeExistingProperty.getPIMComponentProperty)
+										else OclUndefined
+										endif
+		)
+		
+}
+
+rule CIMToPIMAttributeResource{
+	from 
+		CIMAttribute : ABACCIMIN!Attribute(not CIMAttribute.isAttributeResource.oclIsUndefined())
+	to
+		PIMAttribute : ABACPIMOUT!Attribute(
+			attributeCategory <- CIMAttribute.attributeCategory,
+			isAttributeExistingProperty <- thisModule.createAnnPIMComponentProperty(
+						thisModule.getAttributeResourcePIMIds->select(id | id.refImmediateComposite().parentName = CIMAttribute.isAttributeResource.annotatesResource.name)->first()
+						)
+		)
+		
+}
+
+unique lazy rule createNewProperty{
+	from 
+		CIMNewProperty : ABACCIMIN!NewProperty
+	to
+		PIMNewProperty : ABACPIMOUT!NewProperty(
+			name <- CIMNewProperty.name,
+			type <- CIMNewProperty.type,
+			bIsUnique <- CIMNewProperty.bIsUnique,
+			belongsToResource <- thisModule.createAnnResourceModel(CIMNewProperty.belongsToResource.getPIMResourceModel)
+		)
+		
+}
+
+unique lazy rule createAuthorizationSubject{
+	from
+		CIMAuthorizationSubject : ABACCIMIN!AuthorizationSubject
+	to
+		PIMAuthorizationSubject : ABACPIMOUT!AuthorizationSubject(
+			isAuthorizationSubject <- thisModule.createAnnResourceModel(CIMAuthorizationSubject.isAuthorizationSubject.getPIMResourceModel)
+		)
+}
+
+unique lazy rule createAuthorizationPerformer{
+	from
+		CIMAuhtorizableResource : ABACCIMIN!AuthorizableResource
+	to
+		PIMAuhtorizableResource : ABACPIMOUT!AuthorizationPerformer(
+			isAuthorizationPerformer <- thisModule.getAnnCRUDActivities 
+										-> select(AnnCRUDActivity | AnnCRUDActivity.annotatesCRUDActivity.refImmediateComposite().name = CIMAuhtorizableResource.isAuthorizableResource.annotatesResource.name)
+										-> collect(AnnCRUDActivity | thisModule.createPIMAnnCRUDActivityHandler(AnnCRUDActivity)),
+			usesAuthorizationPolicyEvaluator <- thisModule.createPolicyEvaluator(CIMAuhtorizableResource.refImmediateComposite())
+		)
+}
+
+unique lazy rule createPolicyEvaluator{
+	from
+		root : ABACCIMIN!AnnotationModel
+	to
+		PolicyEvaluator : ABACPIMOUT!AuthorizationPolicyEvaluator(
+			accesses <- thisModule.createAuhtorizationDataHandler(COREPIMIN!DatabaseController.allInstances()->first())	
+		)
+}
+
+unique lazy rule createAuhtorizationDataHandler{
+	from
+		DatabaseController : COREPIMIN!DatabaseController
+	to
+		AuthorizationDataHandler : ABACPIMOUT!AuthorizationDataHandler(
+			isAuthorizationDataHandler <- thisModule.createAnnDatabaseController(DatabaseController),
+			hasAuthorizationDataTable <- Sequence{thisModule.createPolicySetDataTable(DatabaseController),
+												thisModule.createPolicyDataTable(DatabaseController),
+												thisModule.createRuleDataTable(DatabaseController),
+												thisModule.createConditionDataTable(DatabaseController),
+												thisModule.createValuesDataTable(DatabaseController)}
+		) 
+}
+
+unique lazy rule createPolicySetDataTable{
+	from
+		DatabaseController : COREPIMIN!DatabaseController
+	to
+		PolicySetDataTable : ABACPIMOUT!AuthorizationDataTable(
+			name <- 'PolicySetDataTable',
+			hasAuthorizationDataTableColumn <- Sequence{PolicySetID,PolicyCombiningAlgorithm,Resource,BelongsToPolicySetFk}
+				
+		),
+		PolicySetID : ABACPIMOUT!AuthorizationDataTableColumn(
+			name <- 'policySetId',
+			type <- 'int',
+			isPrimaryKey <- true,
+			isForeignKey <- false
+		),
+		PolicyCombiningAlgorithm : ABACPIMOUT!AuthorizationDataTableColumn(
+			name <- 'policyCombiningAlgorithm',
+			type <- 'int',
+			isPrimaryKey <- false,
+			isForeignKey <- false
+		),
+		Resource : ABACPIMOUT!AuthorizationDataTableColumn(
+			name <- 'resource',
+			type <- 'string',
+			isPrimaryKey <- false,
+			isForeignKey <- false
+		),
+		BelongsToPolicySetFk : ABACPIMOUT!AuthorizationDataTableColumn(
+			name <- 'belongsToPolicySet',
+			type <- 'int',
+			isPrimaryKey <- false,
+			isForeignKey <- true
+		)
+			
+}
+
+unique lazy rule createPolicyDataTable{
+	from
+		DatabaseController : COREPIMIN!DatabaseController
+	to
+		PolicyDataTable : ABACPIMOUT!AuthorizationDataTable(
+			name <- 'PolicyDataTable',
+			hasAuthorizationDataTableColumn <- Sequence{PolicyID,RuleCombiningAlgorithm,Resource,BelongsToPolicySetFk}
+				
+		),
+		PolicyID : ABACPIMOUT!AuthorizationDataTableColumn(
+			name <- 'policyId',
+			type <- 'int',
+			isPrimaryKey <- true,
+			isForeignKey <- false
+		),
+		RuleCombiningAlgorithm : ABACPIMOUT!AuthorizationDataTableColumn(
+			name <- 'ruleCombiningAlgorithm',
+			type <- 'int',
+			isPrimaryKey <- false,
+			isForeignKey <- false
+		),
+		Resource : ABACPIMOUT!AuthorizationDataTableColumn(
+			name <- 'resource',
+			type <- 'string',
+			isPrimaryKey <- false,
+			isForeignKey <- false
+		),
+		BelongsToPolicySetFk : ABACPIMOUT!AuthorizationDataTableColumn(
+			name <- 'belongsToPolicySet',
+			type <- 'int',
+			isPrimaryKey <- false,
+			isForeignKey <- true
+		)
+}
+
+unique lazy rule createRuleDataTable{
+	from
+		DatabaseController : COREPIMIN!DatabaseController
+	to
+		RuleDataTable : ABACPIMOUT!AuthorizationDataTable(
+			name <- 'RuleDataTable',
+			hasAuthorizationDataTableColumn <- Sequence{PolicyID,RuleType,Resource,BelongsToPolicyFk}			
+		),
+		PolicyID : ABACPIMOUT!AuthorizationDataTableColumn(
+			name <- 'ruleId',
+			type <- 'int',
+			isPrimaryKey <- true,
+			isForeignKey <- false
+		),
+		RuleType : ABACPIMOUT!AuthorizationDataTableColumn(
+			name <- 'ruleType',
+			type <- 'int',
+			isPrimaryKey <- false,
+			isForeignKey <- false
+		),
+		Resource : ABACPIMOUT!AuthorizationDataTableColumn(
+			name <- 'resource',
+			type <- 'string',
+			isPrimaryKey <- false,
+			isForeignKey <- false
+		),
+		BelongsToPolicyFk : ABACPIMOUT!AuthorizationDataTableColumn(
+			name <- 'belongsToPolicy',
+			type <- 'int',
+			isPrimaryKey <- false,
+			isForeignKey <- true
+		)
+}
+
+unique lazy rule createConditionDataTable{
+	from
+		DatabaseController : COREPIMIN!DatabaseController
+	to
+		ConditionDataTable : ABACPIMOUT!AuthorizationDataTable(
+			name <- 'ConditionDataTable',
+			hasAuthorizationDataTableColumn <- Sequence{ConditionId, Operator, LeftCategory, LeftResource, LeftAttribute, RightCategory, RightResource, RightAttribute, BelongsToPolicyFk, BelongsToRuleFk}
+		),
+		ConditionId : ABACPIMOUT!AuthorizationDataTableColumn(
+			name <- 'conditionId',
+			type <- 'int',
+			isPrimaryKey <- true,
+			isForeignKey <- false
+		),
+		Operator : ABACPIMOUT!AuthorizationDataTableColumn(
+			name <- 'operator',
+			type <- 'int',
+			isPrimaryKey <- false,
+			isForeignKey <- false
+		),
+		LeftCategory : ABACPIMOUT!AuthorizationDataTableColumn(
+			name <- 'leftCategory',
+			type <- 'string',
+			isPrimaryKey <- false,
+			isForeignKey <- false
+		),
+		LeftResource : ABACPIMOUT!AuthorizationDataTableColumn(
+			name <- 'leftResource',
+			type <- 'string',
+			isPrimaryKey <- false,
+			isForeignKey <- false
+		),
+		LeftAttribute : ABACPIMOUT!AuthorizationDataTableColumn(
+			name <- 'leftAttribute',
+			type <- 'string',
+			isPrimaryKey <- false,
+			isForeignKey <- true
+		),
+		RightCategory : ABACPIMOUT!AuthorizationDataTableColumn(
+			name <- 'rightCategory',
+			type <- 'string',
+			isPrimaryKey <- false,
+			isForeignKey <- false
+		),
+		RightResource : ABACPIMOUT!AuthorizationDataTableColumn(
+			name <- 'rightResource',
+			type <- 'string',
+			isPrimaryKey <- false,
+			isForeignKey <- false
+		),
+		RightAttribute : ABACPIMOUT!AuthorizationDataTableColumn(
+			name <- 'rightAttribute',
+			type <- 'string',
+			isPrimaryKey <- false,
+			isForeignKey <- true
+		),
+		BelongsToPolicyFk : ABACPIMOUT!AuthorizationDataTableColumn(
+			name <- 'belongsToPolicy',
+			type <- 'int',
+			isPrimaryKey <- false,
+			isForeignKey <- true
+		),
+		BelongsToRuleFk : ABACPIMOUT!AuthorizationDataTableColumn(
+			name <- 'belongsToRule',
+			type <- 'int',
+			isPrimaryKey <- false,
+			isForeignKey <- true
+		)
+}
+
+unique lazy rule createValuesDataTable{
+	from
+		DatabaseController : COREPIMIN!DatabaseController
+	to
+		ValuesDataTable : ABACPIMOUT!AuthorizationDataTable(
+			name <- 'Values',
+			hasAuthorizationDataTableColumn <- Sequence{BelongsToConditionFK, Value}
+		),
+		Value : ABACPIMOUT!AuthorizationDataTableColumn(
+			name <- 'value',
+			type <- 'int',
+			isPrimaryKey <- true,
+			isForeignKey <- false
+		),
+		BelongsToConditionFK : ABACPIMOUT!AuthorizationDataTableColumn(
+			name <- 'belongsToCondition',
+			type <- 'int',
+			isPrimaryKey <- true,
+			isForeignKey <- true
+		)
+}

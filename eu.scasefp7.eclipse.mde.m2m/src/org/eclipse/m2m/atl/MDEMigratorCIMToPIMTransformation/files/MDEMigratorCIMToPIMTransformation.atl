@@ -1,0 +1,120 @@
+-- @path COREPIMIN=/eu.scasefp7.eclipse.mde.m2m/Metamodels/PIMMetamodel.ecore
+-- @path DBMIGRATIONCIMIN=/eu.scasefp7.eclipse.mde.m2m/Metamodels/MDEMigratorCIMMetamodel.ecore
+-- @path DBMIGRATIONPIMOUT=/eu.scasefp7.eclipse.mde.m2m/Metamodels/MDEMigratorPIMMetamodel.ecore
+-- @path CORECIMIN=/eu.scasefp7.eclipse.mde.m2m/Metamodels/CIMMetamodel.ecore
+
+module MDEMigratorCIMToPIMTransformation;
+create OUT : DBMIGRATIONPIMOUT from IN1 : COREPIMIN, IN : CORECIMIN, IN2 : DBMIGRATIONCIMIN;
+
+helper def: getCIMTargetRelations : Sequence(DBMIGRATIONCIMIN!TargetRelation) =
+	let AllCIMTargetRelations : DBMIGRATIONCIMIN!TargetRelation = DBMIGRATIONCIMIN!TargetRelation.allInstances()->asSequence() in
+	AllCIMTargetRelations;
+
+helper def: getPIMResourceModel(CIMCRUDResource : CORECIMIN!Resource) : COREPIMIN!ResourceModel =
+	let AllPIMResourceModels : COREPIMIN!ResourceModel = COREPIMIN!ResourceModel.allInstances()->asSequence() in 
+	AllPIMResourceModels->select(PIMResourceModel | PIMResourceModel.parentName = CIMCRUDResource.name)->at(1);
+
+helper def: getPIMComponentProperty(ResourceModel : COREPIMIN!ResourceModel, CIMProperty : CORECIMIN!Property) : COREPIMIN!PIMComponentProperty =
+	ResourceModel.rModelHasProperty->select(PIMComponentProperty | PIMComponentProperty.name = CIMProperty.name)->at(1);
+
+helper def: getCIMResource(CIMTargetColumn : DBMIGRATIONCIMIN!TargetColumn) : CORECIMIN!Resource =
+	let AllCIMTargetRelations : DBMIGRATIONCIMIN!TargetRelation = DBMIGRATIONCIMIN!TargetRelation.allInstances()->asSequence() in
+	AllCIMTargetRelations->select(CIMTargetRelation | CIMTargetRelation.hasTargetColumn->includes(CIMTargetColumn))->at(1).isTargetRelationResource;
+
+
+rule CIMToPIMDBMigration{
+	from
+		CIMAnnotationModel : DBMIGRATIONCIMIN!AnnotationModel
+	to
+		PIMAnnotationModel : DBMIGRATIONPIMOUT!AnnotationModel(
+			name <- CIMAnnotationModel.name,
+			strDBName <- CIMAnnotationModel.strDBName,
+			strDBURL <- CIMAnnotationModel.strDBURL,
+			strDBType <- CIMAnnotationModel.strDBType,
+			strDBUsername <- CIMAnnotationModel.strDBUsername,
+			strDBPassword <- CIMAnnotationModel.strDBPassword,
+			hasAnnotation <- thisModule.getCIMTargetRelations->collect(CIMTargetRelation | thisModule.createTargetRelation(CIMTargetRelation))
+		)
+}
+
+unique lazy rule createTargetRelation{
+	from 
+		CIMTargetRelation : DBMIGRATIONCIMIN!TargetRelation
+	to
+		PIMTargetRelation : DBMIGRATIONPIMOUT!TargetRelation(
+			relationMappingName <- CIMTargetRelation.relationMappingName,
+			bIsScheduledToLoad <- CIMTargetRelation.bIsScheduledToLoad,
+			hasTargetColumn <- CIMTargetRelation.hasTargetColumn->collect(CIMTargetColumn | thisModule.createTargetColumn(CIMTargetColumn)),
+			isMappedFromRelation <- thisModule.createSourceRelation(CIMTargetRelation.isMappedFromRelation),
+			isTargetRelationResourceModel <- thisModule.getPIMResourceModel(CIMTargetRelation.isTargetRelationResource),
+			migrationOrderIndex <- CIMTargetRelation.migrationOrderIndex,
+			bHasParentMapping <- CIMTargetRelation.bHasParentMapping
+		)
+	do{
+		if (CIMTargetRelation.hasParentMapping.oclIsUndefined() = false){
+			PIMTargetRelation.hasParentMapping <- CIMTargetRelation.hasParentMapping->collect(parentMapping | thisModule.createParentMapping(parentMapping));
+		}
+		PIMTargetRelation;
+	}
+}
+
+unique lazy rule createParentMapping{
+	from
+		CIMParentMapping : DBMIGRATIONCIMIN!ParentMapping
+	to
+		PIMParentMapping : DBMIGRATIONPIMOUT!ParentMapping(
+			sourceRelationFKMappingName <- CIMParentMapping.sourceRelationFKMappingName,
+			hasForeignKeyColumn <- CIMParentMapping.hasForeignKeyColumn->collect(FKColumn | thisModule.createSourceColumn(FKColumn)),
+			hasParentTargetRelation <- thisModule.createTargetRelation(CIMParentMapping.hasParentTargetRelation),
+			requiresJoinTable <- CIMParentMapping.requiresJoinTable,
+			joinTableName <- CIMParentMapping.joinTableName,
+			hasJoinFKToSourceRelation <- CIMParentMapping.hasJoinFKToSourceRelation->collect(FKColumn | thisModule.createJoinColumn(FKColumn)),
+			hasJoinFKToParentSourceRelation <- CIMParentMapping.hasJoinFKToParentSourceRelation->collect(FKColumn | thisModule.createJoinColumn(FKColumn))
+		)
+}
+
+unique lazy rule createTargetColumn{
+	from 
+		CIMTargetColumn : DBMIGRATIONCIMIN!TargetColumn
+	to
+		PIMTargetColumn : DBMIGRATIONPIMOUT!TargetColumn(
+			columnMappingName <- CIMTargetColumn.columnMappingName,
+			isMappedFromColumn <- thisModule.createSourceColumn(CIMTargetColumn.isMappedFromColumn),
+			isAnnotatedPIMComponentProperty <- thisModule.getPIMComponentProperty(thisModule.getPIMResourceModel(thisModule.getCIMResource(CIMTargetColumn)), CIMTargetColumn.isAnnotatedProperty)
+		)
+}
+
+unique lazy rule createSourceRelation{
+	from 
+		CIMSourceRelation : DBMIGRATIONCIMIN!SourceRelation
+	to
+		PIMSourceRelation : DBMIGRATIONPIMOUT!SourceRelation(
+			name <- CIMSourceRelation.name,
+			hasSourceColumn <- CIMSourceRelation.hasSourceColumn->collect(CIMSourceColumn | thisModule.createSourceColumn(CIMSourceColumn)),
+			hasPrimaryKeyColumn <- CIMSourceRelation.hasPrimaryKeyColumn->collect(pkColumn | thisModule.createSourceColumn(pkColumn))
+		)
+}
+
+unique lazy rule createSourceColumn{
+	from 
+		CIMSourceColumn : DBMIGRATIONCIMIN!SourceColumn
+	to
+		PIMSourceColumn : DBMIGRATIONPIMOUT!SourceColumn(
+			name <- CIMSourceColumn.name,
+			type <- CIMSourceColumn.type,
+			hasPkOrder <- CIMSourceColumn.hasPkOrder,
+			hasFKOrder <- CIMSourceColumn.hasFKOrder
+		)
+}
+
+unique lazy rule createJoinColumn{
+	from 
+		CIMJoinColumn : DBMIGRATIONCIMIN!JoinColumn
+	to
+		PIMJoinColumn : DBMIGRATIONPIMOUT!JoinColumn(
+			name <- CIMJoinColumn.name,
+			type <- CIMJoinColumn.type,
+			hasPkOrder <- CIMJoinColumn.hasPkOrder,
+			hasFKOrder <- CIMJoinColumn.hasFKOrder
+		)
+}

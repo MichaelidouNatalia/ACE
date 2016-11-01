@@ -1,0 +1,331 @@
+-- @path COREPIMIN=platform:/plugin/eu.scasefp7.eclipse.mde.m2m/Metamodels/PIMMetamodel.ecore
+-- @path EXTPIMIN=platform:/plugin/eu.scasefp7.eclipse.mde.m2m/Metamodels/ExternalServiceLayerPIMMetamodel.ecore
+-- @path COREPSMIN=platform:/plugin/eu.scasefp7.eclipse.mde.m2m/Metamodels/PSMMetamodel.ecore
+-- @path EXTPSMOUT=platform:/plugin/eu.scasefp7.eclipse.mde.m2m/Metamodels/ExternalServiceLayerPSMMetamodel.ecore
+
+module ExternalServiceLayerPIMToPSM;
+create OUT : EXTPSMOUT from IN : COREPIMIN, IN1 : COREPSMIN, IN2 : EXTPIMIN;
+
+helper def: getAnnAlgoResourceController : Sequence(EXTPIMIN!AnnAlgoResourceController) =
+	let AllAnnAlgoResourceControllers : EXTPIMIN!AnnAlgoResourceController = EXTPIMIN!AnnAlgoResourceController.allInstances().asSequence() in
+		AllAnnAlgoResourceControllers;
+
+helper def: getAnnAlgoResourceModel : Sequence(EXTPIMIN!AnnAlgoResourceModel) =
+	let AllAnnAlgoResourceModels : EXTPIMIN!AnnAlgoResourceModel = EXTPIMIN!AnnAlgoResourceModel.allInstances().asSequence() in
+		AllAnnAlgoResourceModels;
+
+helper def: getAnnResourceModel : Sequence(EXTPIMIN!AnnResourceModel) =
+	let AllAnnResourceModels : EXTPIMIN!AnnResourceModel = EXTPIMIN!AnnResourceModel.allInstances().asSequence() in
+		AllAnnResourceModels;
+
+helper context EXTPIMIN!AnnAlgoResourceController def: getJavaAlgoController : COREPSMIN!JavaAlgoResourceController =
+	let JavaAlgoController : COREPSMIN!JavaAlgoResourceController = COREPSMIN!JavaAlgoResourceController.allInstances()->asSequence()->select(jAlgoController |
+		jAlgoController.parentName = self.annotatesAlgoResourceController.parentName)->at(1) in
+		JavaAlgoController;
+
+helper context EXTPIMIN!AnnAlgoResourceModel def: getJavaAlgoModel : COREPSMIN!JavaAlgoResourceModel =
+	let JavaAlgoModel : COREPSMIN!JavaAlgoResourceModel = COREPSMIN!JavaAlgoResourceModel.allInstances()->asSequence()->select(jAlgoModel |
+		jAlgoModel.parentName = self.annotatesAlgoResourceModel.parentName)->at(1) in
+		JavaAlgoModel;
+
+helper context EXTPIMIN!AnnResourceModel def: getJavaResourceModel : COREPSMIN!JavaResourceModel =
+	let JavaResourceModel : COREPSMIN!JavaResourceModel = COREPSMIN!JavaResourceModel.allInstances()->asSequence()->select(jResourceModel |
+		jResourceModel.parentName = self.annotatesResourceModel.parentName)->at(1) in
+		JavaResourceModel;
+
+helper def: getAnnCRUDActivity : Sequence(EXTPIMIN!AnnCRUDActivity) =
+	let AllAnnCRUDActivities : EXTPIMIN!AnnCRUDActivity = EXTPIMIN!AnnCRUDActivity.allInstances()->asSequence() in
+		AllAnnCRUDActivities;
+
+helper def: getHTTPActivity(HTTPActivityName : String) : CORESPSMIN!HTTPActivity =
+	let HTTPActivity : COREPSMIN!HTTPActivity = COREPSMIN!HTTPActivity.allInstances()->asSequence()->select(httpActivity |
+		httpActivity.name.toLower() = HTTPActivityName.toLower())->at(1) in
+		HTTPActivity;
+
+helper def: getAnnCRUDActivityHandler : Sequence(EXTPIMIN!AnnCRUDActivityHandler) =
+	let AllAnnCRUDActivityHandlers : EXTPIMIN!AnnCRUDActivityHandler = EXTPIMIN!AnnCRUDActivityHandler.allInstances()->asSequence() in
+		AllAnnCRUDActivityHandlers;
+
+helper def: getHTTPActivityHandler(HTTPActivityHandlerName : String) : COREPSMIN!HTTPActivityHandler =
+	let HTTPActivityHandler : COREPSMIN!HTTPActivityHandler = COREPSMIN!HTTPActivityHandler.allInstances()->asSequence()->select(HTTPActivityHandler |
+		HTTPActivityHandler.name.toLower() = HTTPActivityHandlerName.toLower())->at(1) in
+		HTTPActivityHandler;
+
+helper def: convertCRUDToHTTPVerb(CRUDVerbString : String) : String =
+	if
+		CRUDVerbString.substring(1,1) = 'c'  -- then it is create verb and has to be converted to post http verb
+	then
+		'post' + CRUDVerbString.substring(7, CRUDVerbString.size())
+	else
+		if
+			CRUDVerbString.substring(1,1) = 'r' -- then it is read verb and has to be converted to get http verb
+		then
+			'get' + CRUDVerbString.substring(5, CRUDVerbString.size())
+		else
+			if
+				CRUDVerbString.substring(1,1) = 'u' -- then it is update verb and has to be converted to put http verb
+			then
+				'put' + CRUDVerbString.substring(7, CRUDVerbString.size())
+			else
+				 CRUDVerbString -- delete remains the same
+			endif
+		endif
+	endif;
+
+helper def: convertCRUDStringToHTTPString(CRUDVerbString : String) : String =
+	if
+		CRUDVerbString.substring(1,1) = 'C'  -- then it is create verb and has to be converted to post http verb
+	then
+		'POST'
+	else
+		if
+			CRUDVerbString.substring(1,1) = 'R' -- then it is read verb and has to be converted to get http verb
+		then
+			'GET'
+		else
+			if
+				CRUDVerbString.substring(1,1) = 'U' -- then it is update verb and has to be converted to put http verb
+			then
+				'PUT'
+			else
+				 CRUDVerbString -- delete remains the same
+			endif
+		endif
+	endif;
+
+helper def: getRESTClientModel : Sequence(EXTPIMIN!RESTClientModel) =
+	let AllRESTClientModels : EXTPIMIN!RESTClientModel = EXTPIMIN!RESTClientModel.allInstances()->asSequence() in
+	AllRESTClientModels;
+
+helper def: getRESTClientController : Sequence(EXTPIMIN!RESTClientController) =
+	let AllRESTClientControllers : EXTPIMIN!RESTClientController = EXTPIMIN!RESTClientController.allInstances()->asSequence() in
+	AllRESTClientControllers;
+
+rule ExternalServiceLayerLayerPIMToPSM{
+	from
+		ExternalServiceLayerPIMModel : EXTPIMIN!AnnotationModel
+	to
+		ExternalServiceLayerPSMModel : EXTPSMOUT!AnnotationModel(
+			name <- ExternalServiceLayerPIMModel.name,
+			hasAnnotatedElement <- Sequence{thisModule.getAnnAlgoResourceController->collect(annAlgoResourceController | thisModule.createAnnJavaAlgoController(annAlgoResourceController)),
+											thisModule.getAnnCRUDActivity->collect(annCRUDActivity | thisModule.createAnnHTTPActivity(annCRUDActivity)),
+											thisModule.getAnnCRUDActivityHandler->collect(annCRUDActivityHandler | thisModule.createAnnHTTPActivityHandler(annCRUDActivityHandler)),
+											thisModule.getAnnAlgoResourceModel->collect(annAlgoResourceModel | thisModule.createAnnJavaAlgoModel(annAlgoResourceModel)),
+											thisModule.getAnnResourceModel->collect(annResourceModel | thisModule.createAnnJavaResourceModel(annResourceModel))},
+			hasAnnotation <- Sequence{thisModule.getRESTClientModel->collect(RESTClientModel | thisModule.createJavaRESTClientModel(RESTClientModel)),
+									  thisModule.getRESTClientController->collect(RESTClientController | thisModule.createJavaRESTClientController(RESTClientController))}
+		)
+}
+
+unique lazy rule createAnnJavaAlgoController{
+	from
+		AnnAlgoResourceController : EXTPIMIN!AnnAlgoResourceController
+	to
+		AnnJavaAlgoResourceController : EXTPSMOUT!AnnJavaAlgoController(
+			annotatesJavaAlgoController <- AnnAlgoResourceController.getJavaAlgoController
+		)
+}
+
+unique lazy rule createAnnJavaAlgoModel{
+	from
+		AnnAlgoResourceModel : EXTPIMIN!AnnAlgoResourceModel
+	to
+		AnnJavaAlgoResourceModel : EXTPSMOUT!AnnJavaAlgoModel(
+			annotatesJavaAlgoModel <- AnnAlgoResourceModel.getJavaAlgoModel
+		)
+}
+
+unique lazy rule createAnnJavaResourceModel{
+	from
+		AnnResourceModel : EXTPIMIN!AnnResourceModel
+	to
+		AnnJavaResourceModel : EXTPSMOUT!AnnJavaResourceModel(
+			annotatesJavaResourceModel <- AnnResourceModel.getJavaResourceModel
+		)
+}
+
+unique lazy rule createAnnHTTPActivity{
+	from
+		AnnCRUDActivity : EXTPIMIN!AnnCRUDActivity
+	to
+		AnnHTTPActivity : EXTPSMOUT!AnnHTTPActivity(
+			annotatesHTTPActivity <- thisModule.getHTTPActivity(thisModule.convertCRUDToHTTPVerb(AnnCRUDActivity.annotatesCRUDActivity.name))	
+		)
+}
+
+unique lazy rule createAnnHTTPActivityHandler{
+	from
+		AnnCRUDActivityHandler : EXTPIMIN!AnnCRUDActivityHandler
+	to
+		AnnHTTPActivityHandler : EXTPSMOUT!AnnHTTPActivityHandler(
+			annotatesHTTPActivityHandler <- thisModule.getHTTPActivityHandler(thisModule.convertCRUDToHTTPVerb(AnnCRUDActivityHandler.annotatesCRUDActivityHandler.name))	
+		)
+}
+
+unique lazy rule createJavaRESTClientController{
+	from
+		RESTClientController : EXTPIMIN!RESTClientController
+	to
+		JavaRESTClientController : EXTPSMOUT!JavaRESTClientController(
+			isJavaRESTClientController <- thisModule.createAnnJavaAlgoController(RESTClientController.isRESTClientController),
+			hasAssociatedModel <- thisModule.createJavaRESTClientModel(RESTClientController.hasAssociatedClientModel),
+			hasJavaRESTClientHTTPActivity <- thisModule.createJavaRESTClientHTTPActivity(RESTClientController.hasRESTClientCRUDActivity),
+			hasComplexTypes <- RESTClientController.hasComplexTypes->collect(complexType | thisModule.createComplexType(complexType))
+		)
+}
+
+unique lazy rule createComplexType{
+	from
+		PIMComplexType : EXTPIMIN!ComplexType
+	to
+		ComplexType : EXTPSMOUT!ComplexType(
+			complexTypeName <- PIMComplexType.complexTypeName,
+			hasComplexTypeProperties <- PIMComplexType.hasComplexTypeProperties->collect(complexTypeProperty | thisModule.createComplexTypeProperty(complexTypeProperty))
+		)
+}
+
+unique lazy rule createComplexTypeProperty{
+	from
+		PIMComplexTypeProperty : EXTPIMIN!ComplexTypeProperty
+	to
+		ComplexTypeProperty : EXTPSMOUT!ComplexTypeProperty(
+			name <- PIMComplexTypeProperty.name,
+			isUnique <- PIMComplexTypeProperty.isUnique,
+			type <- PIMComplexTypeProperty.type,
+			hasPrimitiveType <- PIMComplexTypeProperty.hasPrimitiveType
+		)
+	do{
+		if (PIMComplexTypeProperty.propertyHasComplexType.oclIsUndefined() = false){
+			ComplexTypeProperty.propertyHasComplexType <- thisModule.createComplexType(PIMComplexTypeProperty.propertyHasComplexType);
+		}
+
+		ComplexTypeProperty;
+	}
+}
+
+unique lazy rule createJavaRESTClientHTTPActivity{
+	from
+		RESTClientCRUDActivity : EXTPIMIN!RESTClientCRUDActivity
+	to
+		JavaRESTClientHTTPActivity : EXTPSMOUT!JavaRESTClientHTTPActivity(
+			isJavaRESTClientHTTPActivity <- thisModule.createAnnHTTPActivity(RESTClientCRUDActivity.isRESTClientCRUDActivity),
+			hasJavaRESTClientHTTPActivityHandler <- thisModule.createJavaRESTClientHTTPActivityHandler(RESTClientCRUDActivity.hasRESTClientCRUDActivityHandler),
+			hasQueryParam <- RESTClientCRUDActivity.hasQueryParam->collect(queryParam | thisModule.createQueryParam(queryParam))
+		)
+}
+
+unique lazy rule createJavaRESTClientHTTPActivityHandler{
+	from
+		RESTClientCRUDActivityHandler : EXTPIMIN!RESTClientCRUDActivityHandler
+	to
+		JavaRESTClientHTTPActivityHandler : EXTPSMOUT!JavaRESTClientHTTPActivityHandler(
+			targetServiceURL <- RESTClientCRUDActivityHandler.targetServiceURL,
+			HTTPVerb <- thisModule.convertCRUDStringToHTTPString(RESTClientCRUDActivityHandler.CRUDVerb),
+			isJavaRESTClientHTTPActivityHandler <- thisModule.createAnnHTTPActivityHandler(RESTClientCRUDActivityHandler.isRESTClientCRUDActivityHandler)
+		)
+}
+
+unique lazy rule createQueryParam{
+	from
+		PIMQueryParam : EXTPIMIN!QueryParam
+	to
+		PSMQueryParam : EXTPSMOUT!QueryParam(
+			name <- PIMQueryParam.name,
+			type <- PIMQueryParam.type,
+			isAuthToken <- PIMQueryParam.isAuthToken,
+			authTokenToURL <- PIMQueryParam.authTokenToURL
+		)
+}
+
+unique lazy rule createJavaRESTClientModel{
+	from
+		RESTClientModel : EXTPIMIN!RESTClientModel
+	to
+		JavaRESTClientModel : EXTPSMOUT!JavaRESTClientModel(
+			isJavaRESTClientModel <- thisModule.createAnnJavaAlgoModel(RESTClientModel.isRESTClientModel)
+		)
+	do{
+		if (RESTClientModel.hasInputDataModel.oclIsUndefined() = false){
+			JavaRESTClientModel.hasJavaInputModel <- thisModule.createJavaInputModel(RESTClientModel.hasInputDataModel);
+		}
+		if (RESTClientModel.hasOutputDataModel.oclIsTypeOf(EXTPIMIN!AutoPersistentOutput) = true){
+			JavaRESTClientModel.hasJavaOutputModel <- thisModule.createAutoPersistentOutputDataModel(RESTClientModel.hasOutputDataModel);
+		}
+		else if (RESTClientModel.hasOutputDataModel.oclIsTypeOf(EXTPIMIN!ExistentCRUDPersistentOutput) = true){
+			JavaRESTClientModel.hasJavaOutputModel <- thisModule.createExistentCRUDPersistentOutputDataModel(RESTClientModel.hasOutputDataModel);
+		}
+		else if (RESTClientModel.hasOutputDataModel.oclIsTypeOf(EXTPIMIN!NonPersistentOutput) = true){
+			JavaRESTClientModel.hasJavaOutputModel <- thisModule.createNonPersistentOutputDataModel(RESTClientModel.hasOutputDataModel);
+		}
+		JavaRESTClientModel;		
+	}
+}
+
+unique lazy rule createAutoPersistentOutputDataModel{
+	from
+		PIMOutputDataModel : EXTPIMIN!OutputDataModel
+	to
+		AutoPersistentOutput : EXTPSMOUT!AutoPersistentOutput(
+			hasOutputProperty <- PIMOutputDataModel.hasOutputProperty->collect(outputProperty | thisModule.createProperty(outputProperty)),
+			hasOutputRepresentation <- thisModule.createRepresentation(PIMOutputDataModel.hasOutputRepresentation)
+		)
+}
+
+unique lazy rule createExistentCRUDPersistentOutputDataModel{
+	from
+		PIMOutputDataModel : EXTPIMIN!OutputDataModel
+	to
+		ExistentJavaModelPersistentOutput : EXTPSMOUT!ExistentJavaModelPersistentOutput(
+			hasOutputProperty <- PIMOutputDataModel.hasOutputProperty->collect(outputProperty | thisModule.createProperty(outputProperty)),
+			hasOutputRepresentation <- thisModule.createRepresentation(PIMOutputDataModel.hasOutputRepresentation),
+			isExistentJavaModelPersistentOutput <- thisModule.createAnnJavaResourceModel(PIMOutputDataModel.isExistentCRUDPersistentOutput)
+		)
+}
+
+unique lazy rule createNonPersistentOutputDataModel{
+	from
+		PIMOutputDataModel : EXTPIMIN!OutputDataModel
+	to
+		NonPersistentOutput : EXTPSMOUT!NonPersistentOutput(
+			hasOutputProperty <- PIMOutputDataModel.hasOutputProperty->collect(outputProperty | thisModule.createProperty(outputProperty)),
+			hasOutputRepresentation <- thisModule.createRepresentation(PIMOutputDataModel.hasOutputRepresentation)
+		)
+}
+
+unique lazy rule createJavaInputModel{
+	from
+		PIMInputDataModel : EXTPIMIN!InputDataModel
+	to
+		JavaInputDataModel : EXTPSMOUT!JavaInputDataModel(
+			hasInputProperty <- PIMInputDataModel.hasInputProperty->collect(inputProperty | thisModule.createProperty(inputProperty)),
+			hasInputRepresentation <- thisModule.createRepresentation(PIMInputDataModel.hasInputRepresentation)
+		)
+}
+
+unique lazy rule createProperty{
+	from
+		PIMProperty : EXTPIMIN!Property
+	to
+		PSMProperty : EXTPSMOUT!Property(
+			name <- PIMProperty.name,
+			type <- PIMProperty.type,
+			isUnique <- PIMProperty.isUnique,
+			hasPrimitiveType <- PIMProperty.hasPrimitiveType
+		)
+	do{
+		if (PIMProperty.hasComplexType.oclIsUndefined() = false){
+			PSMProperty.hasComplexType <- thisModule.createComplexType(PIMProperty.hasComplexType);
+		}
+
+		PSMProperty;
+	}
+}
+
+unique lazy rule createRepresentation{
+	from
+		PIMRepresentation : EXTPIMIN!Representation
+	to
+		PSMRepresentation : EXTPSMOUT!Representation(
+			name <- PIMRepresentation.name
+		)
+}

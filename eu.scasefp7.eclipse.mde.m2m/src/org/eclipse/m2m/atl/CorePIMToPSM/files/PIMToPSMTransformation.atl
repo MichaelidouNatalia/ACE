@@ -1,0 +1,774 @@
+-- @path PIM=/PIMToPSM/PIMMetamodel.ecore
+-- @path PSM=/PIMToPSM/PSMMetamodel.ecore
+
+module PIMToPSMTransformation;
+create OUT : PSM from IN : PIM;
+
+helper context PIM!ResourceControllerCRUDActivity def: convertCRUDVerbToText : String =
+	if self.crudVerb = #CREATE
+	then
+		'create'
+	else
+		if self.crudVerb = #READ
+		then
+			'read'
+		else
+			if self.crudVerb = #UPDATE
+			then
+				'update'
+			else
+				'delete'
+			endif
+		endif
+	endif;
+
+helper context PIM!RDBMSActivity def: convertRDBMSToHibernateName : String =
+	if
+		self.rdbmsVerb = #INSERT  --convert to post
+	then
+		'post' + self.name.substring(7,self.name.size())
+	else
+		if
+			self.rdbmsVerb = #SELECT --convert to get
+		then
+			'get' + self.name.substring(5,self.name.size())
+		else
+			if
+				self.rdbmsVerb = #UPDATE --convert to put
+			then
+				'put' + self.name.substring(7,self.name.size())
+			else
+				 self.name -- delete remains the same
+			endif
+		endif
+	endif;
+	
+	
+helper context PIM!RDBMSActivity def: convertRDBMSToHTTPVerb : PSM!HTTPVerb =
+	if
+		self.rdbmsVerb = #INSERT
+	then
+		#POST
+	else
+		if
+			self.rdbmsVerb = #SELECT
+		then
+			#GET
+		else
+			if
+				self.rdbmsVerb = #UPDATE
+			then
+				#PUT
+			else
+				#DELETE
+			endif
+		endif
+	endif;
+
+
+helper def: convertCRUDToHTTPName(CRUDString : String, CRUDVerb : PIM!CRUDVerb) : String =
+	if
+		CRUDVerb = #CREATE
+	then
+		'Post' + CRUDString.substring(7, CRUDString.size())
+	else
+		if
+			CRUDVerb = #READ
+		then
+			'Get' + CRUDString.substring(5, CRUDString.size())
+		else
+			if
+				CRUDVerb = #UPDATE
+			then
+				'Put' + CRUDString.substring(7, CRUDString.size())
+			else -- it is #DELETE
+				'D' + CRUDString.substring(2, CRUDString.size()) -- delete remains the same
+			endif
+		endif
+	endif;
+
+helper def: convertCRUDtoHTTPVerb(CRUDVerb : PIM!CRUDVerb) : PSM!HTTPVerb =
+	if
+		CRUDVerb = #CREATE
+	then
+		#POST
+	else
+		if
+			CRUDVerb = #READ
+		then
+			#GET
+		else
+			if
+				CRUDVerb = #UPDATE
+			then
+				#PUT
+			else --else it is #DELETE
+				#DELETE
+			endif
+		endif
+	endif;
+			
+helper def: convertHTTPVerbToText(HTTPVerb : PSM!HTTPVerb) : String =
+	if  HTTPVerb = #POST
+	then 'POST'
+	else
+		if HTTPVerb = #PUT
+		then 'PUT'
+		else
+			if HTTPVerb = #GET
+			then 'GET'
+			else 'DELETE'
+			endif
+		endif
+	endif;
+			
+helper context PIM!PIMComponentProperty def: getResourceByProperty : PIM!ResourceModel =
+	let AllPIMResourceModels : PIM!ResourceModel = PIM!ResourceModel.allInstances()->asSequence() in
+		AllPIMResourceModels->select(PIMResourceModel | PIMResourceModel.rModelHasProperty->includes(self));
+
+helper context PIM!ResourceModel def: getResourcePrimaryIdentifier : PIM!PIMComponentProperty =
+	self.rModelHasProperty->select(Property | Property.isPrimaryIdentifier = true);
+
+helper context PIM!ResourceModel def: getParentPIMModels : Sequence(PIM!ResourceModel) =
+	let AllPIMResourceModels : PIM!ResourceModel = PIM!ResourceModel.allInstances()->asSequence() in
+		AllPIMResourceModels->select(PIMResourceModel | PIMResourceModel.hasRelatedModelManager->exists(PIMRMManager | PIMRMManager.hasRelatedModel = self));
+
+helper context PIM!ResourceModel def: getRelatedPIMModels : Sequence(PIM!ResourceModel) =
+	let AllPIMResourceModels : PIM!ResourceModel = PIM!ResourceModel.allInstances()->asSequence() in
+		AllPIMResourceModels->select(PIMResourceModel | self.hasRelatedModelManager->exists(PIMRMManager | PIMRMManager.hasRelatedModel = PIMResourceModel));
+
+helper context PIM!ResourceControllerCRUDActivity def: belongsToAlgoController : Boolean =
+	let AllPIMAlgoControllers : PIM!AlgoResourceController = PIM!AlgoResourceController.allInstances()->asSequence() in
+		if AllPIMAlgoControllers->exists(AlgoController | AlgoController.algoControllerHasCRUDActivity = self)
+		then
+			true
+		else
+			false
+		endif;
+
+helper context PIM!ResourceControllerCRUDActivity def: belongsToRCManager : Boolean =
+	let AllPIMRCManagers : PIM!ResourceControllerManager = PIM!ResourceControllerManager.allInstances()->asSequence() in
+		if AllPIMRCManagers->exists(RCManager | RCManager.rCManagerHasCRUDActivity->exists(CRUDActivity | CRUDActivity = self))
+		then
+			true
+		else
+			false
+		endif;
+
+helper context PIM!ResourceControllerCRUDActivity def: belongsToRController : Boolean =
+	let AllPIMRControllers : PIM!ResourceController = PIM!ResourceController.allInstances()->asSequence() in
+		if AllPIMRControllers->exists(RController | RController.rControllerHasCRUDActivity->exists(CRUDActivity | CRUDActivity = self))
+		then
+			true
+		else
+			false
+		endif;
+
+helper context PIM!ResourceControllerCRUDActivity def: hasParentResource : Boolean =
+	let AllPIMResourceControllers : PIM!ResourceController = PIM!ResourceController.allInstances()->asSequence() in
+		let AllPIMRCManagers : PIM!ResourceControllerManager = PIM!ResourceControllerManager.allInstances()->asSequence() in
+			if AllPIMResourceControllers->exists(ResourceController | ResourceController.rControllerHasCRUDActivity->exists(CRUDActivity | CRUDActivity = self))
+			then
+				if AllPIMResourceControllers->select(ResourceController | ResourceController.rControllerHasCRUDActivity->exists(CRUDActivity | CRUDActivity = self))->at(1).hasAssociatedRModel.getParentPIMModels->size() > 0 -- if this resource has a parent resource
+				then
+					true
+				else
+					false
+				endif
+			else
+				if 	AllPIMRCManagers->select(RCManager | RCManager.rCManagerHasCRUDActivity->exists(CRUDActivity | CRUDActivity = self))->at(1).hasAssociatedRMManager.hasRelatedModel.getParentPIMModels->size() > 0
+				then
+					true
+				else
+					false
+				endif
+			endif;
+			
+helper context PIM!ResourceControllerCRUDActivity def: getParentModelIdentifierName : String =
+	let AllPIMResourceControllers : PIM!ResourceController = PIM!ResourceController.allInstances()->asSequence() in
+		let AllPIMRCManagers : PIM!ResourceControllerManager = PIM!ResourceControllerManager.allInstances()->asSequence() in
+			if AllPIMResourceControllers->exists(ResourceController | ResourceController.rControllerHasCRUDActivity->exists(CRUDActivity | CRUDActivity = self))
+			then
+				let PIMResourceModel : PIM!ResourceModel = AllPIMResourceControllers->select(ResourceController | ResourceController.rControllerHasCRUDActivity->exists(CRUDActivity | CRUDActivity = self))->at(1).hasAssociatedRModel in
+				PIMResourceModel.getParentPIMModels->select(PIMParentModel | self.name = self.convertCRUDVerbToText + if PIMResourceModel.hasMultipleParents then PIMParentModel.parentName + PIMResourceModel.parentName else PIMResourceModel.parentName endif)->at(1).getResourcePrimaryIdentifier->at(1).name
+			else
+				let PIMResourceModel : PIM!ResourceModel = AllPIMRCManagers->select(PIMRCManager | PIMRCManager.rCManagerHasCRUDActivity->exists(CRUDActivity | CRUDActivity = self))->at(1).hasAssociatedRMManager.hasRelatedModel in
+				PIMResourceModel.getParentPIMModels->select(PIMParentModel | self.name = self.convertCRUDVerbToText + if PIMResourceModel.hasMultipleParents then PIMParentModel.parentName + PIMResourceModel.parentName + if (self.crudVerb = #READ) then 'List' else '' endif else PIMResourceModel.parentName + if (self.crudVerb = #READ) then 'List' else '' endif endif)->at(1).getResourcePrimaryIdentifier->at(1).name
+			endif;
+
+helper context PIM!ResourceControllerCRUDActivity def: getModelName : String =
+	let AllPIMResourceControllers : PIM!ResourceController = PIM!ResourceController.allInstances()->asSequence() in
+		let AllPIMRCManagers : PIM!ResourceControllerManager = PIM!ResourceControllerManager.allInstances()->asSequence() in
+			if AllPIMResourceControllers->exists(ResourceController | ResourceController.rControllerHasCRUDActivity->exists(CRUDActivity | CRUDActivity = self))
+			then
+				AllPIMResourceControllers->select(ResourceController | ResourceController.rControllerHasCRUDActivity->exists(CRUDActivity | CRUDActivity = self))->at(1).hasAssociatedRModel.name
+			else
+				AllPIMRCManagers->select(PIMRCManager | PIMRCManager.rCManagerHasCRUDActivity->exists(CRUDActivity | CRUDActivity = self))->at(1).hasAssociatedRMManager.hasRelatedModel.name
+			endif;
+			
+helper context PIM!ResourceModel def: hasMultipleParents : Boolean =
+	let AllPIMResourceModels : PIM!ResourceModel = PIM!ResourceModel.allInstances()->asSequence() in
+	if AllPIMResourceModels->select(ResourceModel | ResourceModel.hasRelatedModelManager->exists(RMManager | RMManager.hasRelatedModel = self))->size() > 1
+	then
+		true
+	else
+		false
+	endif;
+
+helper context PIM!ResourceControllerCRUDActivity def: getModelIdentifierName : String =
+	let AllPIMResourceControllers : PIM!ResourceController = PIM!ResourceController.allInstances()->asSequence() in
+		let AllPIMRCManagers : PIM!ResourceControllerManager = PIM!ResourceControllerManager.allInstances()->asSequence() in
+			if AllPIMResourceControllers->exists(ResourceController | ResourceController.rControllerHasCRUDActivity->exists(CRUDActivity | CRUDActivity = self))
+			then
+				AllPIMResourceControllers->select(ResourceController | ResourceController.rControllerHasCRUDActivity->exists(CRUDActivity | CRUDActivity = self))->at(1).hasAssociatedRModel.getResourcePrimaryIdentifier->at(1).name
+			else
+				AllPIMRCManagers->select(AllPIMRCManagers | AllPIMRCManagers.rCManagerHasCRUDActivity->exists(CRUDActivity | CRUDActivity = self))->at(1).hasAssociatedRMManager.hasRelatedModel.getResourcePrimaryIdentifier->at(1).name
+			endif;
+	
+helper context PIM!ResourceControllerCRUDActivity def: isSelfRelated : Boolean =
+	let AllPIMResourceControllers : PIM!ResourceController = PIM!ResourceController.allInstances()->asSequence() in
+		let PIMResourceModel : PIM!ResourceModel = AllPIMResourceControllers->select(ResourceController | ResourceController.rControllerHasCRUDActivity->exists(CRUDActivity | CRUDActivity = self))->at(1).hasAssociatedRModel in
+			if self.hasParentResource = true
+			then
+				if PIMResourceModel.getParentPIMModels->select(PIMParentModel | self.name = self.convertCRUDVerbToText + if PIMResourceModel.hasMultipleParents then PIMParentModel.parentName + PIMResourceModel.parentName else PIMResourceModel.parentName endif)->at(1) = PIMResourceModel
+				then true
+				else false
+				endif
+			else false
+			endif;
+
+helper context PIM!ResourceControllerCRUDActivity def: getActivityProducesText : String =
+	let AllPIMResourceControllers : PIM!ResourceController = PIM!ResourceController.allInstances()->asSequence() in
+		let AllPIMRCManagers : PIM!ResourceControllerManager = PIM!ResourceControllerManager.allInstances()->asSequence() in
+			let AllPIMAlgoControllers : PIM!AlgoResourceController = PIM!AlgoResourceController.allInstances()->asSequence() in -- fix so as to be able to support multiple media types
+				if AllPIMResourceControllers->exists(ResourceController | ResourceController.rControllerHasCRUDActivity->exists(CRUDActivity | CRUDActivity = self))
+				then
+					AllPIMResourceControllers->select(ResourceController | ResourceController.rControllerHasCRUDActivity->exists(CRUDActivity | CRUDActivity = self))
+						->at(1).hasAssociatedRModel.rModelHasIRepresentation->at(1).inputMediaTypeToText
+				else
+					if AllPIMRCManagers->exists(PIMRCManager | PIMRCManager.rCManagerHasCRUDActivity->exists(CRUDActivity | CRUDActivity = self))
+					then
+						AllPIMRCManagers->select(PIMRCManager | PIMRCManager.rCManagerHasCRUDActivity->exists(CRUDActivity | CRUDActivity = self))
+							->at(1).hasAssociatedRMManager.rMManagerHasInputRepresentation->at(1).inputMediaTypeToText
+					else
+						AllPIMAlgoControllers->select(PIMAlgoController | PIMAlgoController.algoControllerHasCRUDActivity = self)
+							->at(1).hasAssociatedAlgoModel.algoModelHasInputRepresentation->at(1).inputMediaTypeToText
+					endif
+				endif;	
+
+helper context PIM!ResourceInputRepresentation  def: inputMediaTypeToText : String =
+	if self.inputType = #JSON
+	then 'application/JSON'
+	else 'application/XML'
+	endif;
+
+helper context PIM!ResourceControllerCRUDActivity def: getActivityConsumesText : String =
+	let AllPIMResourceControllers : PIM!ResourceController = PIM!ResourceController.allInstances()->asSequence() in
+		let AllPIMRCManagers : PIM!ResourceControllerManager = PIM!ResourceControllerManager.allInstances()->asSequence() in
+			let AllPIMAlgoControllers : PIM!AlgoResourceController = PIM!AlgoResourceController.allInstances()->asSequence() in -- fix so as to be able to support multiple media types
+				if AllPIMResourceControllers->exists(ResourceController | ResourceController.rControllerHasCRUDActivity->exists(CRUDActivity | CRUDActivity = self))
+				then
+					AllPIMResourceControllers->select(ResourceController | ResourceController.rControllerHasCRUDActivity->exists(CRUDActivity | CRUDActivity = self))
+						->at(1).hasAssociatedRModel.rModelHasOutputRepresentation->at(1).outputMediaTypeToText
+				else
+					if AllPIMRCManagers->exists(PIMRCManager | PIMRCManager.rCManagerHasCRUDActivity->exists(CRUDActivity | CRUDActivity = self))
+					then
+						AllPIMRCManagers->select(PIMRCManager | PIMRCManager.rCManagerHasCRUDActivity->exists(CRUDActivity | CRUDActivity = self))
+							->at(1).hasAssociatedRMManager.rMManagerHasOutputRepresentation->at(1).outputMediaTypeToText
+					else
+						AllPIMAlgoControllers->select(PIMAlgoController | PIMAlgoController.algoControllerHasCRUDActivity = self)
+							->at(1).hasAssociatedAlgoModel.algoModelHasOutputRepresentation->at(1).outputMediaTypeToText
+					endif
+				endif;	
+
+helper context PIM!ResourceOutputRepresentation  def: outputMediaTypeToText : String =
+	if self.outputType = #JSON
+	then 'application/JSON'
+	else 'application/XML'
+	endif;
+		
+helper context PIM!AlgoResourceModel def: getParentAlgoModel : Sequence(PIM!AlgoResourceModel) =
+	let AllPIMAlgoModels : Sequence(PIM!AlgoResourceModel) = PIM!AlgoResourceModel.allInstances()->asSequence() in
+		AllPIMAlgoModels->select(ParentAlgoModel | ParentAlgoModel.hasRelatedAlgoModel->includes(self));
+
+rule PIMToPSMService{
+	from
+		PIMService: PIM!RESTfulServicePIM
+	to
+		PSMService: PSM!ServicePSM(
+			name <- PIMService.name,
+			serviceOutputPath <- PIMService.serviceOutputPath,
+			serviceDatabaseIP <- PIMService.serviceDatabaseIP,
+			serviceDatabasePort <- PIMService.serviceDatabasePort,
+			serviceDatabaseUsername <- PIMService.serviceDatabaseUsername,
+			serviceDatabasePassword <- PIMService.serviceDatabasePassword,
+			serviceDatabaseType     <- PIMService.serviceDatabaseType,
+			hasJavaRModel <- PIMService.hasResourceModel->collect(PIMResourceModel | thisModule.createJavaRModel(PIMResourceModel)),
+			hasJavaRController <- PIMService.hasResourceController->collect(PIMResourceController | thisModule.createJavaRController(PIMResourceController)),
+			hasJavaRCManager <- PIMService.hasResourceControllerManager->collect(PIMRCManager | thisModule.createJavaRCManager(PIMRCManager)),
+			hasJavaRMManager <- PIMService.hasResourceModelManager->collect(PIMRMManager | thisModule.createJavaRMManager(PIMRMManager)),
+			hasJavaAlgoModel <- PIMService.hasAlgoResourceModel->collect(PIMAlgoModel | thisModule.createJavaAlgoModel(PIMAlgoModel)),
+			hasJavaAlgoController <- PIMService.hasAlgoResourceController->collect(PIMAlgoRController | thisModule.createJavaAlgoController(PIMAlgoRController)),
+			hasHibernateController <- thisModule.createHibernateController(PIMService.hasDatabaseController)
+		)
+}
+
+unique lazy rule createJavaRModel{
+	from
+		PIMResourceModel: PIM!ResourceModel
+	to
+		PSMJavaRModel: PSM!JavaResourceModel(
+			parentName <- PIMResourceModel.parentName,
+			name <- 'Java' + PIMResourceModel.name,
+			JavaRModelHasJAXBAnnotation <- thisModule.createJAXBAnnotation('@XmlRootElement'),
+			JavaRModelHasProperty <- PIMResourceModel.rModelHasProperty->collect(PIMComponentProperty | thisModule.createPSMComponentProperty(PIMComponentProperty))
+									 ->union(Sequence{PIMResourceModel.getParentPIMModels->collect(PIMParentModel | thisModule.createManyToOneHibernateProperty(PIMParentModel, PIMResourceModel))})
+									 ->union(Sequence{PIMResourceModel.getRelatedPIMModels->collect(PIMRelatedModel | thisModule.createOneToManyHibernateProperty(PIMRelatedModel, PIMResourceModel))}),
+			hasRelatedJavaRMManager <- PIMResourceModel.hasRelatedModelManager->collect(PIMRelatedMManager | thisModule.createJavaRMManager(PIMRelatedMManager)),
+			JavaRModelHasHibernateAnnotation <- Sequence{thisModule.createHibernateAnnotation('@Entity'), thisModule.createHibernateAnnotation('@Table(name="' + PIMResourceModel.parentName + '")')},
+			JavaRModelHasSetter <- PIMResourceModel.rModelHasSetter->collect(PIMRModelSetter | thisModule.createJavaSetter(PIMRModelSetter))
+								   ->union(Sequence{PIMResourceModel.getParentPIMModels->collect(PIMParentModel | thisModule.createManyToOneHibernateSetter(PIMParentModel, PIMResourceModel))})
+								   ->union(Sequence{PIMResourceModel.getRelatedPIMModels->collect(PIMRelatedModel | thisModule.createOneToManyHibernateSetter(PIMRelatedModel, PIMResourceModel))}),
+			JavaRModelHasGetter <- PIMResourceModel.rModelHasGetter->collect(PIMRModelGetter | thisModule.createJavaGetter(PIMRModelGetter))
+								   ->union(Sequence{PIMResourceModel.getParentPIMModels->collect(PIMParentModel | thisModule.createManyToOneHibernateGetter(PIMParentModel, PIMResourceModel))})
+								   ->union(Sequence{PIMResourceModel.getRelatedPIMModels->collect(PIMRelatedModel | thisModule.createOneToManyHibernateGetter(PIMRelatedModel, PIMResourceModel))}),
+			hasRelatedJavaAlgoModel <- PIMResourceModel.hasRelatedAlgoModel->collect(PIMRelatedAlgoModel | thisModule.createJavaAlgoModel(PIMRelatedAlgoModel))
+		)
+}
+
+unique lazy rule createJavaRController{
+	from
+		PIMResourceController: PIM!ResourceController
+	to
+		PSMJavaRController: PSM!JavaResourceController(
+			parentName <- PIMResourceController.parentName,
+			name <- 'Java' + PIMResourceController.name,
+			controllerURI <- PIMResourceController.controllerURI,
+			hasAssociatedJavaRModel <- thisModule.createJavaRModel(PIMResourceController.hasAssociatedRModel),
+			JavaRControllerHasHTTPActivity <- PIMResourceController.rControllerHasCRUDActivity->collect(CRUDActivity | thisModule.createHTTPActivity(CRUDActivity)),
+			JavaRControllerHasJAXRSAnnotation <- thisModule.createJAXRSAnnotation('@Path("' + PIMResourceController.controllerURI + '")')
+		)
+}
+
+unique lazy rule createJavaRCManager{
+	from
+		PIMRCManager: PIM!ResourceControllerManager
+	to
+		JavaRCManager: PSM!JavaResourceControllerManager(
+			parentName <- PIMRCManager.parentName,
+			name <- 'Java' + PIMRCManager.name,
+			controllerURI <- PIMRCManager.controllerURI,
+			hasAssociatedRMManager <- thisModule.createJavaRMManager(PIMRCManager.hasAssociatedRMManager),
+			JavaRCManagerHasHTTPActivity <-PIMRCManager.rCManagerHasCRUDActivity->collect(CRUDActivity | thisModule.createHTTPActivity(CRUDActivity)),
+			JavaRCManagerHasJAXRSAnnotation <- thisModule.createJAXRSAnnotation('@Path("' + PIMRCManager.controllerURI + '")')
+		)
+}
+
+unique lazy rule createJavaRMManager{
+	from
+		PIMRMManager: PIM!ResourceModelManager
+	to
+		JavaRMManager: PSM!JavaResourceModelManager(
+			parentName <- PIMRMManager.parentName,
+			name <- 'Java' + PIMRMManager.name,
+			JavaRMManagerHasProperty <- thisModule.createPSMComponentProperty(PIMRMManager.hasRMManagerProperty),
+			JavaRMManagerHasGetter <- thisModule.createJavaGetter(PIMRMManager.rMManagerHasGetter),
+			JavaRMManagerHasSetter <- thisModule.createJavaSetter(PIMRMManager.rMManagerHasSetter),
+			hasRelatedJavaRModel <- thisModule.createJavaRModel(PIMRMManager.hasRelatedModel),
+			JavaRMManagerHasJAXBAnnotation <- thisModule.createJAXBAnnotation('@XmlRootElement')
+		)
+}
+
+unique lazy rule createJavaAlgoModel{
+	from
+		PIMAlgoModel: PIM!AlgoResourceModel
+	to
+		JavaAlgoModle: PSM!JavaAlgoResourceModel(
+			parentName <- PIMAlgoModel.parentName,
+			name <- 'Java' + PIMAlgoModel.name,
+			JavaAlgoModelHasProperty <- thisModule.createPSMComponentProperty(PIMAlgoModel.algoModelHasProperty),
+			JavaAlgoModelHasGetterFunction <- thisModule.createJavaGetter(PIMAlgoModel.algoModelHasGetter),
+			JavaAlgoModelHasSetterFunction <- thisModule.createJavaSetter(PIMAlgoModel.algoModelHasSetter),
+			JavaAlgoModelHasJAXBAnnotation <- thisModule.createJAXBAnnotation('@XmlRootElement'),
+			hasRelatedAlgoModel <- PIMAlgoModel.hasRelatedAlgoModel->collect(RelatedAlgoModel | thisModule.createJavaAlgoModel(RelatedAlgoModel)),
+			isRelatedAlgoModel <- PIMAlgoModel.getParentAlgoModel->collect(ParentAlgoModel | thisModule.createJavaAlgoModel(ParentAlgoModel))
+		)
+}
+
+unique lazy rule createJavaAlgoController{
+	from
+		PIMAlgoRController: PIM!AlgoResourceController
+	to
+		JavaAlgoController: PSM!JavaAlgoResourceController(
+			parentName <- PIMAlgoRController.parentName,
+			name <- 'Java' + PIMAlgoRController.name,
+			controllerURI <- PIMAlgoRController.controllerURI,
+			JavaAlgoRControllerHasHTTPActivity <- thisModule.createHTTPActivity(PIMAlgoRController.algoControllerHasCRUDActivity),
+			hasAssociatedAlgoModel <- thisModule.createJavaAlgoModel(PIMAlgoRController.hasAssociatedAlgoModel),
+			AlgoControllerHasJAXRSAnnotation <- thisModule.createJAXRSAnnotation('@Path("' + PIMAlgoRController.controllerURI + '")')
+		)
+}
+
+unique lazy rule createHibernateController{
+	from
+		PIMDatabaseController: PIM!DatabaseController
+	to
+		HibernateController: PSM!HibernateController(
+			name <- 'HibernateController',
+			hasHibernateActivity <- PIMDatabaseController.hasRDBMSActivity->collect(RDBMSActivity | thisModule.createHibernateActivity(RDBMSActivity))
+		)
+}
+
+unique lazy rule createPSMComponentProperty{
+	from
+		PIMComponentProperty: PIM!PIMComponentProperty
+	to
+		PSMComponentProperty: PSM!PSMComponentProperty(
+			name <- PIMComponentProperty.name,
+			type <- PIMComponentProperty.type,
+			bIsUnique <- PIMComponentProperty.isUnique,
+			bIsNamingProperty <- PIMComponentProperty.isNamingProperty,
+			bIsPrimaryIdentifier <- PIMComponentProperty.isPrimaryIdentifier,
+			PropertyHasHibernateAnnotation <- if PSMComponentProperty.bIsPrimaryIdentifier -- if this is a primary identifier property
+											  then
+											  		Sequence{thisModule.createHibernateAnnotation('@Id'), 
+															 thisModule.createHibernateAnnotation('@GeneratedValue'),
+															 thisModule.createHibernateAnnotation('@Column(name = "\\"' + PIMComponentProperty.name.toLower() + '\\"")')}
+											  else
+											  		if PIMComponentProperty.name = 'linklist'-- if this is a linklist property
+													then
+														thisModule.createHibernateAnnotation('@Transient')
+													else
+														if PIMComponentProperty.isUnique = true
+														then
+															thisModule.createHibernateAnnotation('@Column(name = "\\"' + PIMComponentProperty.name.toLower() + '\\"")')
+														else
+											  				Sequence{thisModule.createHibernateAnnotation('@ElementCollection(fetch = FetchType.EAGER)'),
+																	 thisModule.createHibernateAnnotation('@CollectionTable(name="' + PIMComponentProperty.getResourceByProperty->at(1).parentName + PIMComponentProperty.name +'", joinColumns=@JoinColumn(name="' + PIMComponentProperty.getResourceByProperty->at(1).getResourcePrimaryIdentifier->at(1).name + '"))'),
+																	 thisModule.createHibernateAnnotation('@Column(name = "\\"' + PIMComponentProperty.name.toLower() + '\\"")'),
+																	 thisModule.createHibernateAnnotation('@ForeignKey(name = "fk_' + PIMComponentProperty.getResourceByProperty->at(1).parentName + '_' + PIMComponentProperty.name + '")')}
+											  			endif
+													endif
+											  endif
+		)
+}
+
+unique lazy rule createJavaSetter{
+	from
+		PIMSetterFunction: PIM!SetterFunction
+	to
+		JavaSetterFunction: PSM!JavaSetterFunction(
+			setsProperty <- thisModule.createPSMComponentProperty(PIMSetterFunction.setsProperty),
+			name <- PIMSetterFunction.name,
+			hasFunctionParameter <- PIMSetterFunction.hasFunctionParameter->collect(PIMFunctionParameter | thisModule.createFunctionParameter(PIMFunctionParameter))
+		)
+}
+
+unique lazy rule createFunctionParameter{
+	from
+		PIMFunctionParameter: PIM!FunctionParameter
+	to
+		PSMFunctionParameter: PSM!FunctionParameter(
+			name <- PIMFunctionParameter.name,
+			type <- PIMFunctionParameter.type,
+			bIsUnique <- PIMFunctionParameter.isUnique,
+			bIsReturnParameter <- PIMFunctionParameter.bIsReturnParameter
+		)
+}
+
+unique lazy rule createJavaGetter{
+	from
+		PIMGetterFunction: PIM!GetterFunction
+	to
+		JavaGetterFunction: PSM!JavaGetterFunction(
+			getsProperty <- thisModule.createPSMComponentProperty(PIMGetterFunction.getsProperty),
+			name <- PIMGetterFunction.name,
+			hasFunctionParameter <- PIMGetterFunction.hasFunctionParameter->collect(PIMFunctionParameter | thisModule.createFunctionParameter(PIMFunctionParameter))
+		)
+}
+
+unique lazy rule createHibernateActivity{
+	from
+		RDBMSActivity: PIM!RDBMSActivity
+	to
+		HibernateActivity: PSM!HibernateActivity(
+			name <- RDBMSActivity.convertRDBMSToHibernateName,
+			HibernateActivityHTTPVerb <- RDBMSActivity.convertRDBMSToHTTPVerb
+		)
+}
+
+unique lazy rule createHTTPActivity{
+	from
+		CRUDActivity: PIM!ResourceControllerCRUDActivity
+	to
+		HTTPActivity: PSM!HTTPActivity(
+			name <- thisModule.convertCRUDToHTTPName(CRUDActivity.name, CRUDActivity.crudVerb),
+			HTTPActivityURI <- CRUDActivity.activityURI,
+			ActivityHTTPVerb <- thisModule.convertCRUDtoHTTPVerb(CRUDActivity.crudVerb),
+			hasHTTPActivityHandler <- thisModule.createHTTPActivityHandler(CRUDActivity.hasCRUDActivityHandler),
+--			isMappedToHibernateActivity <-
+			hasHTTPActivityParameter <- if CRUDActivity.belongsToAlgoController
+										then Sequence{}
+										else
+											if CRUDActivity.crudVerb = #CREATE -- if this is a CREATE CRUDActivity
+											then
+												if CRUDActivity.hasParentResource
+												then Sequence{thisModule.createHTTPActivityParameter(CRUDActivity.getParentModelIdentifierName, 'int'),
+															  thisModule.createHTTPActivityParameter('oJava' + CRUDActivity.getModelName, 'Java' + CRUDActivity.getModelName)}
+												else thisModule.createHTTPActivityParameter('oJava' + CRUDActivity.getModelName, 'Java' + CRUDActivity.getModelName)
+												endif
+											else
+												if CRUDActivity.crudVerb = #READ -- if this is a READ CRUDActivity
+												then
+													if CRUDActivity.belongsToRCManager -- if it is a READ @ ResourceControllerManager
+													then
+														if CRUDActivity.hasParentResource
+														then thisModule.createHTTPActivityParameter(CRUDActivity.getParentModelIdentifierName, 'int')
+														else Sequence{}
+														endif
+													else -- if it is a READ @ ResourceController
+														thisModule.createHTTPActivityParameter(if CRUDActivity.isSelfRelated 
+																							   then 'target' + CRUDActivity.getModelIdentifierName 
+																							   else CRUDActivity.getModelIdentifierName endif , 'int')
+													endif
+												else
+													if CRUDActivity.crudVerb = #UPDATE -- if this is an UPDATE CRUDActivity
+													then 
+														if CRUDActivity.hasParentResource
+														then Sequence{thisModule.createHTTPActivityParameter(CRUDActivity.getParentModelIdentifierName, 'int'),
+															          thisModule.createHTTPActivityParameter(if CRUDActivity.isSelfRelated 
+																							  				 then 'target' + CRUDActivity.getModelIdentifierName 
+																							   				 else CRUDActivity.getModelIdentifierName endif , 'int'),
+																	  thisModule.createHTTPActivityParameter('oJava' + CRUDActivity.getModelName, 'Java' + CRUDActivity.getModelName)}
+														else Sequence{thisModule.createHTTPActivityParameter(CRUDActivity.getModelIdentifierName, 'int'),
+																	  thisModule.createHTTPActivityParameter('oJava' + CRUDActivity.getModelName, 'Java' + CRUDActivity.getModelName)}
+														endif
+													else -- else it is  a #DELETE CRUDActivity
+														thisModule.createHTTPActivityParameter(if CRUDActivity.isSelfRelated 
+																							   then 'target' + CRUDActivity.getModelIdentifierName 
+																							   else CRUDActivity.getModelIdentifierName endif , 'int')
+													endif
+												endif
+											endif
+										endif,
+			HTTPActivityHasJAXRSAnnotation <- if CRUDActivity.crudVerb = #CREATE
+											  then Sequence{thisModule.createJAXRSAnnotation('@Path("' + CRUDActivity.activityURI + '")'),
+															thisModule.createJAXRSAnnotation('@' + thisModule.convertHTTPVerbToText(thisModule.convertCRUDtoHTTPVerb(CRUDActivity.crudVerb))),
+															thisModule.createJAXRSAnnotation('@Produces("' + CRUDActivity.getActivityProducesText + '")'),
+															thisModule.createJAXRSAnnotation('@Consumes("' + CRUDActivity.getActivityConsumesText + '")')}
+											  else
+											  		if CRUDActivity.crudVerb = #READ
+													then Sequence{thisModule.createJAXRSAnnotation('@Path("' + CRUDActivity.activityURI + '")'),
+											  					  thisModule.createJAXRSAnnotation('@' + thisModule.convertHTTPVerbToText(thisModule.convertCRUDtoHTTPVerb(CRUDActivity.crudVerb))),
+																  thisModule.createJAXRSAnnotation('@Produces("' + CRUDActivity.getActivityProducesText + '")')}
+													else
+														if CRUDActivity.crudVerb = #UPDATE
+														then Sequence{thisModule.createJAXRSAnnotation('@Path("' + CRUDActivity.activityURI + '")'),
+															          thisModule.createJAXRSAnnotation('@' + thisModule.convertHTTPVerbToText(thisModule.convertCRUDtoHTTPVerb(CRUDActivity.crudVerb))),
+																	  thisModule.createJAXRSAnnotation('@Produces("' + CRUDActivity.getActivityProducesText + '")'),
+																	  thisModule.createJAXRSAnnotation('@Consumes("' + CRUDActivity.getActivityConsumesText + '")')}
+														else Sequence{thisModule.createJAXRSAnnotation('@Path("' + CRUDActivity.activityURI + '")'),
+																	  thisModule.createJAXRSAnnotation('@' + thisModule.convertHTTPVerbToText(thisModule.convertCRUDtoHTTPVerb(CRUDActivity.crudVerb))),
+																	  thisModule.createJAXRSAnnotation('@Produces("' + CRUDActivity.getActivityProducesText + '")')}
+														endif
+													endif
+												endif
+		)
+}
+
+
+rule createHTTPActivityParameter(parameterName : String, parameterType : String){
+	to
+		HTTPActivityFunctionParameter: PSM!HTTPActivityFunctionParameter(
+			name <- parameterName,
+			type <- parameterType,
+			bIsUnique <- true,
+			bIsReturnParameter <- false
+		)
+	do{
+		if (parameterType = 'int'){
+			HTTPActivityFunctionParameter.HTTPFunctionParameterHasJAXRSAnnotation <- thisModule.createJAXRSAnnotation('@PathParam("' + parameterName + '")');
+		}
+		HTTPActivityFunctionParameter;	
+	}
+}
+
+unique lazy rule createHTTPActivityHandler{
+	from
+		CRUDActivityHandler: PIM!CRUDActivityHandler
+	to
+		HTTPActivityHandler: PSM!HTTPActivityHandler(
+			name <- thisModule.convertCRUDToHTTPName(CRUDActivityHandler.name, CRUDActivityHandler.crudVerb),
+			HandlerHTTPVerb <- thisModule.convertCRUDtoHTTPVerb(CRUDActivityHandler.crudVerb),
+			hasHypermediaFunction <- thisModule.createHypermediaFunction(CRUDActivityHandler.hasHypermediaFunction)
+		)
+}
+
+unique lazy rule createHypermediaFunction{
+	from
+		CreateHypermediaPIMFunction: PIM!CreateHypermediaPIMFunction
+	to
+		JavaHypermediaFunction: PSM!JavaHypermediaFunction(
+			hasPSMHypermediaLink <- CreateHypermediaPIMFunction.hasHypermediaLink->collect(HypermediaLink | thisModule.createPSMHypermediaLink(HypermediaLink))
+		)
+}
+
+unique lazy rule createPSMHypermediaLink{
+	from
+		HypermediaLink: PIM!HypermediaLink
+	to
+		PSMHypermediaLink: PSM!PSMHypermediaLink(
+			LinkType <- HypermediaLink.linkType,
+			LinkHTTPVerb <- thisModule.convertCRUDtoHTTPVerb(HypermediaLink.linkCRUDVerb)
+		)
+	do{
+		if(HypermediaLink.hasTargetRCManager->oclIsUndefined() = false){
+			PSMHypermediaLink.hasTargetRCManager <- thisModule.createJavaRCManager(HypermediaLink.hasTargetRCManager);
+		}
+		
+		if(HypermediaLink.hasTargetRController->oclIsUndefined() = false){
+			PSMHypermediaLink.hasTargetJavaRController <- thisModule.createJavaRController(HypermediaLink.hasTargetRController);
+		}
+		
+		if(HypermediaLink.hasTargetAlgoController->oclIsUndefined() = false){
+			PSMHypermediaLink.hasTargetJavaAlgoController <- thisModule.createJavaAlgoController(HypermediaLink.hasTargetAlgoController);
+		}
+	}
+}
+
+rule createJAXBAnnotation(annotationText : String){
+	to
+		JAXBAnnotation: PSM!JAXBAnnotation(
+			JAXBAnnotationText <- annotationText	
+		)
+	do{
+		JAXBAnnotation;	
+	}
+}
+
+rule createHibernateAnnotation(annotationText : String){
+	to
+		HibernateAnnotation: PSM!HibernateAnnotation(
+			HibernateAnnotationText <- annotationText	
+		)
+	do{
+		HibernateAnnotation;	
+	}
+}
+
+rule createJAXRSAnnotation(annotationText : String){
+	to
+		JAXRSAnnotation: PSM!JAXRSAnnotation(
+			JAXRSAnnotationText <- annotationText	
+		)
+	do{
+		JAXRSAnnotation;	
+	}
+}
+
+rule createManyToOneHibernateProperty(PIMParentModel : PIM!ResourceModel, PIMResourceModel : PIM!ResourceModel){
+	to
+		PSMComponentProperty: PSM!PSMComponentProperty(
+			name <- PIMParentModel.parentName,
+			type <- 'Java' + PIMParentModel.name,
+			bIsUnique <- true,
+			bIsNamingProperty <- false,
+			bIsPrimaryIdentifier <- false,
+			PropertyHasHibernateAnnotation <- Sequence{thisModule.createHibernateAnnotation('@ManyToOne(fetch = FetchType.EAGER)'),
+													   thisModule.createHibernateAnnotation('@JoinColumn(name="' + if PIMResourceModel = PIMParentModel then 'sourse' else '' endif +PIMParentModel.getResourcePrimaryIdentifier->at(1).name + '")'),
+													   thisModule.createHibernateAnnotation('@ForeignKey(name = "fk_' + PIMParentModel.parentName + '_' + PIMResourceModel.parentName + '")')}
+		)
+	do{
+		PSMComponentProperty;	
+	}	
+}
+
+rule createManyToOneHibernateSetter(PIMParentModel : PIM!ResourceModel, PIMResourceModel : PIM!ResourceModel){
+	to
+		JavaSetterFunction: PSM!JavaSetterFunction(
+			--setsProperty <- thisModule.createPSMComponentProperty(PIMSetterFunction.setsProperty),
+			name <- 'set' + PIMParentModel.parentName,
+			hasFunctionParameter <- thisModule.createHibernateSetterFunctionParameter(PIMParentModel, false),
+			SetterFunctionHasJAXBAnnotation <- thisModule.createJAXBAnnotation('@XmlTransient')
+		)
+	do{
+		JavaSetterFunction;	
+	}
+}
+
+rule createOneToManyHibernateSetter(PIMRelatedModel : PIM!ResourceModel, PIMResourceModel : PIM!ResourceModel){
+	to
+		JavaSetterFunction: PSM!JavaSetterFunction(
+			name <- 'setSetOfJava' + PIMRelatedModel.name,
+			hasFunctionParameter <- thisModule.createHibernateSetterFunctionParameter(PIMRelatedModel, true),
+			SetterFunctionHasJAXBAnnotation <- thisModule.createJAXBAnnotation('@XmlTransient')
+		)
+	do{
+		JavaSetterFunction;	
+	}
+}
+
+rule createHibernateSetterFunctionParameter(PIMResourceModel : PIM!ResourceModel, isChildModel : Boolean){
+	to
+		FunctionParameter: PSM!FunctionParameter(
+			name <- if isChildModel = false then PIMResourceModel.parentName else 'SetOfJava' + PIMResourceModel.name endif,
+			type <- 'Java' + PIMResourceModel.name,
+			bIsUnique <- if isChildModel = false then true else false endif,
+			bIsReturnParameter <- false
+		)
+	do{
+		FunctionParameter;	
+	}
+}
+
+rule createManyToOneHibernateGetter(PIMParentModel : PIM!ResourceModel, PIMResourceModel : PIM!ResourceModel){
+	to
+		JavaGetterFunction: PSM!JavaGetterFunction(
+			--getsProperty <- ,
+			name <- 'get' + PIMParentModel.parentName,
+			hasFunctionParameter <- thisModule.createHibernateGetterFunctionParameter(PIMParentModel, false)	
+		)
+	do{
+		JavaGetterFunction;	
+	}
+}
+
+rule createOneToManyHibernateGetter(PIMRelatedModel : PIM!ResourceModel, PIMResourceModel : PIM!ResourceModel){
+	to
+		JavaGetterFunction: PSM!JavaGetterFunction(
+			name <- 'getSetOfJava' + PIMRelatedModel.name,
+			hasFunctionParameter <- thisModule.createHibernateGetterFunctionParameter(PIMRelatedModel, true)
+		)
+	do{
+		JavaGetterFunction;	
+	}
+}
+
+rule createHibernateGetterFunctionParameter(PIMResourceModel : PIM!ResourceModel, isChildModel : Boolean){
+	to
+		FunctionParameter: PSM!FunctionParameter(
+			name <- if isChildModel = false then PIMResourceModel.parentName else 'SetOfJava' + PIMResourceModel.name endif,
+			type <- 'Java' + PIMResourceModel.name,
+			bIsUnique <- if isChildModel = false then true else false endif,
+			bIsReturnParameter <- true
+		)
+	do{
+		FunctionParameter;	
+	}
+}
+
+rule createOneToManyHibernateProperty(PIMRelatedModel : PIM!ResourceModel, PIMResourceModel : PIM!ResourceModel){
+	to
+		PSMComponentProperty : PSM!PSMComponentProperty(
+			name <- 'SetOfJava' + PIMRelatedModel.name,
+			type <- 'Java' + PIMRelatedModel.name,
+			bIsUnique <- false,
+			bIsNamingProperty <- false,
+			bIsPrimaryIdentifier <- false,
+			PropertyHasHibernateAnnotation <- Sequence{thisModule.createHibernateAnnotation('@OneToMany(fetch = FetchType.LAZY, mappedBy="' + PIMResourceModel.parentName + '",orphanRemoval=true)'),
+													   thisModule.createHibernateAnnotation('@OnDelete(action=OnDeleteAction.CASCADE)')}
+		)
+	do{
+		PSMComponentProperty;	
+	}
+}
